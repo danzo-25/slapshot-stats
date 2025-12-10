@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit as st
 import pandas as pd
 import altair as alt
 from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix
@@ -73,52 +72,36 @@ else:
             sos_matrix, standings = get_weekly_schedule_matrix()
         
         if not sos_matrix.empty and standings:
-            # --- COLOR LOGIC ---
             def color_sos(val, my_team_abbr):
-                """
-                val: The cell value (e.g. "vs TOR" or "")
-                my_team_abbr: The row index (e.g. "EDM")
-                """
-                if not val or val == "":
-                    return 'background-color: #262730' # Grey for no game
-                
-                # Extract Opponent Name ("vs TOR" -> "TOR")
+                if not val or val == "": return 'background-color: #262730'
                 opp_abbr = val.split(" ")[1] 
-                
-                # Get Points % (Strength)
                 my_str = standings.get(my_team_abbr, 0.5)
                 opp_str = standings.get(opp_abbr, 0.5)
-                
-                # Calculate Advantage
-                # Positive = I am stronger (Green)
-                # Negative = Opponent is stronger (Red)
                 diff = my_str - opp_str
                 
-                # Gradient Logic (Hex Codes)
-                # Thresholds: +/- 0.15 is a massive gap
-                if diff > 0.15: return 'background-color: #1b5e20; color: white'  # Deep Green
-                elif diff > 0.05: return 'background-color: #2e7d32; color: white' # Medium Green
-                elif diff > 0.00: return 'background-color: #4caf50; color: black' # Light Green
-                elif diff > -0.05: return 'background-color: #fbc02d; color: black' # Yellow/Even
-                elif diff > -0.15: return 'background-color: #c62828; color: white' # Medium Red
-                else: return 'background-color: #b71c1c; color: white'            # Deep Red
+                if diff > 0.15: return 'background-color: #1b5e20; color: white'
+                elif diff > 0.05: return 'background-color: #2e7d32; color: white'
+                elif diff > 0.00: return 'background-color: #4caf50; color: black'
+                elif diff > -0.05: return 'background-color: #fbc02d; color: black'
+                elif diff > -0.15: return 'background-color: #c62828; color: white'
+                else: return 'background-color: #b71c1c; color: white'
 
-            # Apply Style row by row
-            # We iterate through the dataframe and apply the style function
-            def apply_style(df):
-                return df.style.apply(lambda row: [color_sos(val, row.name) for val in row], axis=1)
-
-            styled_sos = apply_style(sos_matrix)
+            # Apply Style
+            styled_sos = sos_matrix.style.apply(lambda row: [color_sos(val, row.name) for val in row], axis=1)
             
-            # Display
-            st.dataframe(styled_sos, use_container_width=True, height=600)
+            # --- FIX: CENTER TEXT ---
+            styled_sos = styled_sos.set_properties(**{'text-align': 'center'})
+
+            # --- FIX: MAKE TABLE NARROWER ---
+            # use_container_width=False makes it strictly respect content size
+            st.dataframe(styled_sos, use_container_width=False, height=500, width=800)
         else:
             st.info("Strength of Schedule data unavailable.")
 
         st.divider()
 
-        # 3. WEEKLY CHARTS
-        st.header("🔥 Hot This Week")
+        # 3. WEEKLY CHARTS (RESTORED ALL 4)
+        st.header("🔥 Hot This Week (Last 7 Days)")
         with st.spinner("Loading weekly trends..."):
             df_weekly = load_weekly_leaders()
         
@@ -136,6 +119,11 @@ else:
             c1, c2 = st.columns(2)
             with c1: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
             with c2: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
+            
+            # --- RESTORED SOG & PPP CHARTS ---
+            c3, c4 = st.columns(2)
+            with c3: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
+            with c4: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
 
     # ================= TAB 2: ANALYTICS =================
     with tab_analytics:
@@ -224,11 +212,10 @@ else:
 
         styled_df = filt_df.style.apply(highlight_my_team, axis=1)
         
-        # Apply formatting
-        whole_num_cols = ['GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SO', 'OTL']
+        whole_num_cols = ['GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SO', 'OTL', '+/-']
         valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
         styled_df = styled_df.format("{:.0f}", subset=valid_whole)
-        styled_df = styled_df.format("{:.1f}", subset=['FP'])
+        styled_df = styled_df.format("{:.1f}", subset=['FP', 'Sh%', 'FO%', 'SAT%', 'USAT%'])
         styled_df = styled_df.format("{:.2f}", subset=['GAA', 'GSAA'])
         styled_df = styled_df.format("{:.3f}", subset=['SV%'])
 
