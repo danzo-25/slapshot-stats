@@ -44,6 +44,15 @@ st.markdown("""
     .news-desc { font-size: 0.9em; color: #ccc; margin-top: 5px; }
     .trade-win { background-color: rgba(76, 175, 80, 0.15); border: 2px solid #4caf50; padding: 15px; border-radius: 8px; text-align: center; }
     .trade-loss { background-color: rgba(244, 67, 54, 0.15); border: 2px solid #f44336; padding: 15px; border-radius: 8px; text-align: center; }
+    
+    /* SELECTED PLAYER CARD STYLING */
+    .selected-player-card {
+        background-color: #333;
+        border: 1px solid #555;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 8px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -177,175 +186,23 @@ else:
         all_players = sorted(df['Player'].unique().tolist())
         c1, c_mid, c2 = st.columns([1, 0.1, 1])
 
-        # --- SENDING ---
-        with c1:
-            st.subheader("📤 Sending")
-            opts_s = [p for p in all_players if p not in st.session_state.trade_recv]
-            st.selectbox(
-                "Add Player", 
-                options=opts_s, 
-                index=None, 
-                placeholder="Type to add player...", 
-                key="sb_send", 
-                on_change=add_player_from_select, 
-                args=('send',),
-                label_visibility="collapsed"
-            )
-            if st.session_state.trade_send:
-                st.markdown("---")
-                for p in st.session_state.trade_send:
-                    c_txt, c_btn = st.columns([0.8, 0.2])
-                    c_txt.write(f"**{p}**")
-                    c_btn.button("❌", key=f"del_s_{p}", on_click=remove_player, args=(p, 'send'))
-
-        # --- RECEIVING ---
-        with c2:
-            st.subheader("📥 Receiving")
-            opts_r = [p for p in all_players if p not in st.session_state.trade_send]
-            st.selectbox(
-                "Add Player", 
-                options=opts_r, 
-                index=None, 
-                placeholder="Type to add player...", 
-                key="sb_recv", 
-                on_change=add_player_from_select, 
-                args=('recv',),
-                label_visibility="collapsed"
-            )
-            if st.session_state.trade_recv:
-                st.markdown("---")
-                for p in st.session_state.trade_recv:
-                    c_txt, c_btn = st.columns([0.8, 0.2])
-                    c_txt.write(f"**{p}**")
-                    c_btn.button("❌", key=f"del_r_{p}", on_click=remove_player, args=(p, 'recv'))
-
-        # --- CALCULATIONS ---
-        if st.session_state.trade_send or st.session_state.trade_recv:
-            st.divider()
+        # --- HELPER: PLAYER CARD DISPLAY ---
+        def show_selected_player_card(player_name, side):
+            p_data = df[df['Player'] == player_name].iloc[0]
+            pid = p_data['ID']
+            team = p_data['Team']
+            # ASSET URL FIX: Use 20242025 + Team Code to ensure image loads
+            img_url = f"https://assets.nhle.com/mugs/nhl/20242025/{team}/{pid}.png"
             
-            df_send = df[df['Player'].isin(st.session_state.trade_send)]
-            df_recv = df[df['Player'].isin(st.session_state.trade_recv)]
-            
-            if not df_send.empty and not df_recv.empty:
-                diff = df_recv['ROS_FP'].sum() - df_send['ROS_FP'].sum()
-                st.subheader("The Verdict")
-                if diff > 0: st.markdown(f"""<div class="trade-box trade-win"><h2>✅ You Win!</h2><p>Projected Gain: <b>+{diff:.1f} FP</b></p></div>""", unsafe_allow_html=True)
-                elif diff < 0: st.markdown(f"""<div class="trade-box trade-loss"><h2>❌ You Lose.</h2><p>Projected Loss: <b>{diff:.1f} FP</b></p></div>""", unsafe_allow_html=True)
-                else: st.info("Trade is even.")
-
-            # Summary Table
-            st.markdown("#### Projected Totals (Rest of Season)")
-            stats_map = {'Fantasy Points': 'ROS_FP', 'Goals': 'ROS_G', 'Assists': 'ROS_A', 'Points': 'ROS_Pts', 'PPP': 'ROS_PPP', 'SOG': 'ROS_SOG', 'Hits': 'ROS_Hits', 'Blocks': 'ROS_BkS', 'Wins': 'ROS_W'}
-            
-            summary_data = []
-            for label, col in stats_map.items():
-                if col in df.columns:
-                    val_s = df_send[col].sum()
-                    val_r = df_recv[col].sum()
-                    summary_data.append({'Stat': label, 'Sending': val_s, 'Receiving': val_r, 'Net': val_r - val_s})
-            
-            summary_df = pd.DataFrame(summary_data).set_index('Stat')
-
-            def highlight_winner(row):
-                s, r = row['Sending'], row['Receiving']
-                green, red = 'color: #4caf50; font-weight: bold', 'color: #f44336; font-weight: bold'
-                if r > s: return [red, green, green] 
-                elif s > r: return [green, red, red] 
-                return ['', '', '',]
-
-            styled_summary = summary_df.style.format("{:+.1f}", subset=['Net']).format("{:.1f}", subset=['Sending', 'Receiving']).apply(highlight_winner, axis=1)
-            st.dataframe(styled_summary, use_container_width=True)
-
-            # --- INDIVIDUAL PLAYERS (With Headshots + Tooltips) ---
-            st.caption("Individual Player Stats (Current & Projected)")
-            full_list = pd.concat([df_send, df_recv])
-            
-            if not full_list.empty:
-                full_list['Side'] = full_list['Player'].apply(lambda x: 'Receiving' if x in st.session_state.trade_recv else 'Sending')
+            # --- CARD LAYOUT ---
+            # Image | Info | Stats | Close
+            with st.container(border=True):
+                r1, r2, r3, r4 = st.columns([0.25, 0.35, 0.3, 0.1])
                 
-                # --- NEW: ADD HEADSHOT URL ---
-                # We use the standard NHL asset URL pattern
-                full_list['Headshot'] = full_list['ID'].apply(lambda x: f"https://assets.nhle.com/mugs/nhl/20252026/{x}.png")
-
-                # Define Display Columns
-                cols_to_show = [
-                    'Side', 'Headshot', 'Player', 'Team', 'Pos', 
-                    'FP', 'ROS_FP',
-                    'G', 'ROS_G',
-                    'A', 'ROS_A',
-                    'Pts', 'ROS_Pts',
-                    'PPP', 'ROS_PPP',
-                    'SOG', 'ROS_SOG',
-                    'Hits', 'ROS_Hits'
-                ]
+                with r1:
+                    st.image(img_url, width=60)
                 
-                final_cols = [c for c in cols_to_show if c in full_list.columns]
-                
-                # Define Column Config with Tooltips and Images
-                trade_col_config = {
-                    "Headshot": st.column_config.ImageColumn("Img", help="Player Headshot"),
-                    "Side": st.column_config.TextColumn("Side", pinned=True),
-                    "Player": st.column_config.TextColumn("Player", pinned=True),
-                    "FP": st.column_config.NumberColumn("FP", help="Current Fantasy Points", format="%.1f"),
-                    "ROS_FP": st.column_config.NumberColumn("ROS FP", help="Rest of Season Projected FP", format="%.1f"),
-                    "G": st.column_config.NumberColumn("G", help="Current Goals", format="%.0f"),
-                    "ROS_G": st.column_config.NumberColumn("ROS G", help="Projected Goals (Rest of Season)", format="%.1f"),
-                    "A": st.column_config.NumberColumn("A", help="Current Assists", format="%.0f"),
-                    "ROS_A": st.column_config.NumberColumn("ROS A", help="Projected Assists (Rest of Season)", format="%.1f"),
-                    "Pts": st.column_config.NumberColumn("Pts", help="Current Points", format="%.0f"),
-                    "ROS_Pts": st.column_config.NumberColumn("ROS Pts", help="Projected Points (Rest of Season)", format="%.1f"),
-                    "PPP": st.column_config.NumberColumn("PPP", help="Current Power Play Points", format="%.0f"),
-                    "ROS_PPP": st.column_config.NumberColumn("ROS PPP", help="Projected PPP (Rest of Season)", format="%.1f"),
-                    "SOG": st.column_config.NumberColumn("SOG", help="Current Shots", format="%.0f"),
-                    "ROS_SOG": st.column_config.NumberColumn("ROS SOG", help="Projected Shots (Rest of Season)", format="%.1f"),
-                    "Hits": st.column_config.NumberColumn("Hits", help="Current Hits", format="%.0f"),
-                    "ROS_Hits": st.column_config.NumberColumn("ROS Hits", help="Projected Hits (Rest of Season)", format="%.1f"),
-                }
-
-                # Apply Formatting
-                current_stats = ['G', 'A', 'Pts', 'PPP', 'SOG', 'Hits', 'BkS']
-                valid_current = [c for c in current_stats if c in final_cols]
-                
-                proj_stats = [c for c in final_cols if 'ROS_' in c or 'FP' in c]
-                
-                styled_player_table = full_list[final_cols].style \
-                    .format("{:.0f}", subset=valid_current) \
-                    .format("{:.1f}", subset=proj_stats)
-
-                st.dataframe(
-                    styled_player_table, 
-                    use_container_width=True, 
-                    hide_index=True,
-                    column_config=trade_col_config, # Apply Tooltips & Images
-                    row_height=60 # Make rows slightly taller for images
-                )
-
-    # ================= TAB 4: MY ROSTER =================
-    with tab_fantasy:
-        st.header("⚔️ My Roster")
-        col_up, _ = st.columns([1, 2])
-        uploaded_file = col_up.file_uploader("📂 Load Saved Roster", type=["csv"])
-        if uploaded_file:
-            try:
-                udf = pd.read_csv(uploaded_file)
-                if "Player" in udf.columns: 
-                    st.session_state.my_roster = [p for p in udf["Player"] if p in df['Player'].values]
-            except: pass
-
-        selected_players = st.multiselect("Search Players:", df['Player'].unique(), default=st.session_state.my_roster)
-        st.session_state.my_roster = selected_players
-
-        if selected_players:
-            team_df = df[df['Player'].isin(selected_players)]
-            st.download_button("💾 Save Roster", team_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Goals", int(team_df['G'].sum()))
-            c2.metric("Points", int(team_df['Pts'].sum()))
-            c3.metric("Total FP", f"{team_df['FP'].sum():,.1f}")
-            c4.metric("Goalie Wins", int(team_df['W'].sum()))
-            
-            styled_team = team_df.style.format("{:.0f}", subset=[c for c in whole_num_cols if c in team_df.columns])
-            styled_team = styled_team.format("{:.1f}", subset=['FP'])
-            cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining']]
-            st.dataframe(styled_team, use_container_width=True, hide_index=True, column_order=cols)
+                with r2:
+                    st.markdown(f"**{player_name}**")
+                    st.caption(f"{p_data['Team']} • {p_data['Pos']}")
 
