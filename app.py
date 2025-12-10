@@ -7,7 +7,6 @@ st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
 st.title("🏒 NHL 2025-26 Dashboard")
 
 # --- INITIALIZE SESSION STATE ---
-# This allows the roster to persist between tabs
 if 'my_roster' not in st.session_state:
     st.session_state.my_roster = []
 
@@ -148,24 +147,27 @@ else:
         cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType']]
         df = df[cols]
 
+        # --- STRICT FORMAT CONFIGURATION ---
         column_config = {
             "ID": None,
             "Player": st.column_config.TextColumn("Player", pinned=True),
             "FP": st.column_config.NumberColumn("FP", help="Fantasy Points", format="%.1f"),
             "Team": st.column_config.TextColumn("Team"),
             "Pos": st.column_config.TextColumn("Pos"),
-            "GP": st.column_config.NumberColumn("GP", help="Games Played"),
-            "G": st.column_config.NumberColumn("G", help="Goals"),
-            "A": st.column_config.NumberColumn("A", help="Assists"),
-            "Pts": st.column_config.NumberColumn("Pts", help="Points"),
-            "PPP": st.column_config.NumberColumn("PPP", help="PPP"),
-            "SHP": st.column_config.NumberColumn("SHP", help="SHP"),
-            "SOG": st.column_config.NumberColumn("SOG", help="SOG"),
-            "Hits": st.column_config.NumberColumn("Hits", help="Hits"),
-            "BkS": st.column_config.NumberColumn("BkS", help="Blocks"),
-            "SAT%": st.column_config.NumberColumn("SAT%", help="Corsi %", format="%.1f%%"),
-            "USAT%": st.column_config.NumberColumn("USAT%", help="Fenwick %", format="%.1f%%"),
-            "W": st.column_config.NumberColumn("W", help="Wins"),
+            # Integers (No Decimals)
+            "GP": st.column_config.NumberColumn("GP", format="%.0f"),
+            "G": st.column_config.NumberColumn("G", format="%.0f"),
+            "A": st.column_config.NumberColumn("A", format="%.0f"),
+            "Pts": st.column_config.NumberColumn("Pts", format="%.0f"),
+            "PPP": st.column_config.NumberColumn("PPP", format="%.0f"),
+            "SHP": st.column_config.NumberColumn("SHP", format="%.0f"),
+            "SOG": st.column_config.NumberColumn("SOG", format="%.0f"),
+            "Hits": st.column_config.NumberColumn("Hits", format="%.0f"),
+            "BkS": st.column_config.NumberColumn("BkS", format="%.0f"),
+            "W": st.column_config.NumberColumn("W", format="%.0f"),
+            # Decimals/Rates
+            "SAT%": st.column_config.NumberColumn("SAT%", format="%.1f%%"),
+            "USAT%": st.column_config.NumberColumn("USAT%", format="%.1f%%"),
             "SV%": st.column_config.NumberColumn("SV%", format="%.3f"),
             "GAA": st.column_config.NumberColumn("GAA", format="%.2f"),
             "GSAA": st.column_config.NumberColumn("GSAA", format="%.2f"),
@@ -187,12 +189,12 @@ else:
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
 
         # --- HIGHLIGHT LOGIC ---
-        # 1. Define function
+        # 1. Define function that returns specific CSS string
         def highlight_my_team(row):
-            # Check if player is in the session state roster
+            # If the player name is in the roster list
             if row['Player'] in st.session_state.my_roster:
-                # Return a 'Gold' background color for that row
-                return ['background-color: #383b22'] * len(row)
+                # Return 'background-color' for the WHOLE row
+                return ['background-color: #574d28'] * len(row) 
             else:
                 return [''] * len(row)
 
@@ -200,7 +202,13 @@ else:
         styled_df = filt_df.style.apply(highlight_my_team, axis=1)
 
         # 3. Render
-        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_config=column_config)
+        st.dataframe(
+            styled_df, 
+            use_container_width=True, 
+            hide_index=True, 
+            height=600, 
+            column_config=column_config
+        )
 
     # ================= TAB 3: FANTASY =================
     with tab_fantasy:
@@ -209,7 +217,6 @@ else:
         with col_up:
             uploaded_file = st.file_uploader("📂 Load Saved Roster", type=["csv"])
         
-        # LOGIC: Update session state from file
         if uploaded_file:
             try:
                 udf = pd.read_csv(uploaded_file)
@@ -218,14 +225,12 @@ else:
                     st.session_state.my_roster = valid_players
             except: pass
 
-        # MULTISELECT (Syncs with session state)
         selected_players = st.multiselect(
             "Search Players:", 
             df['Player'].unique(), 
             default=st.session_state.my_roster
         )
         
-        # Update session state immediately if changed
         st.session_state.my_roster = selected_players
 
         if selected_players:
