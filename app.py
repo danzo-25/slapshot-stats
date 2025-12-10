@@ -3,7 +3,7 @@ import pandas as pd
 import altair as alt
 from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news
 
-st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
+st.set_page_config(layout="wide", page_title="Slapshot Stats")
 st.title("🏒 Slapshot Stats")
 
 # --- SESSION STATE ---
@@ -20,17 +20,13 @@ st.markdown("""
     .team-name { font-weight: 900; font-size: 1em; margin-top: -2px; }
     .vs-text { font-size: 1em; font-weight: bold; color: #888; padding-top: 5px; }
     .game-time { margin-top: 5px; font-weight: bold; color: #FF4B4B; font-size: 0.9em; border-top: 1px solid #41444e; padding-top: 2px; }
-    
-    /* NEWS STYLING */
-    .news-card {
-        background-color: #1e1e1e;
-        border-left: 4px solid #0083b8;
-        padding: 10px;
-        margin-bottom: 10px;
-        border-radius: 4px;
-    }
+    .news-card { background-color: #1e1e1e; border-left: 4px solid #0083b8; padding: 10px; margin-bottom: 10px; border-radius: 4px; }
     .news-title { font-weight: bold; font-size: 1.05em; color: #fff; text-decoration: none; }
     .news-desc { font-size: 0.9em; color: #ccc; margin-top: 5px; }
+    
+    /* Trade Analyzer Styles */
+    .trade-win { border: 2px solid #4caf50; padding: 10px; border-radius: 5px; background-color: rgba(76, 175, 80, 0.1); }
+    .trade-loss { border: 2px solid #f44336; padding: 10px; border-radius: 5px; background-color: rgba(244, 67, 54, 0.1); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -40,11 +36,47 @@ with st.spinner('Loading NHL Data...'):
 if df.empty:
     st.warning("No data found. API might be down.")
 else:
-    tab_home, tab_analytics, tab_fantasy = st.tabs(["🏠 Home", "📊 Data & Analytics", "⚔️ My Fantasy Team"])
+    # ==========================================
+    # GLOBAL SETTINGS (SIDEBAR)
+    # ==========================================
+    with st.sidebar:
+        st.header("⚙️ League Settings")
+        with st.expander("Fantasy Scoring (FP)", expanded=False):
+            st.caption("Customize these to match your league.")
+            # Default values
+            val_G = st.number_input("Goals", value=2.0)
+            val_A = st.number_input("Assists", value=1.0)
+            val_PPP = st.number_input("PPP", value=0.5)
+            val_SHP = st.number_input("SHP", value=0.5)
+            val_SOG = st.number_input("SOG", value=0.1)
+            val_Hit = st.number_input("Hits", value=0.1)
+            val_BkS = st.number_input("Blocks", value=0.5)
+            val_W = st.number_input("Wins", value=4.0)
+            val_GA = st.number_input("GA", value=-2.0)
+            val_Svs = st.number_input("Saves", value=0.2)
+            val_SO = st.number_input("Shutouts", value=3.0)
+            val_OTL = st.number_input("OTL", value=1.0)
+
+    # --- CALCULATE FP GLOBALLY ---
+    # We do this here so 'FP' is available in ALL tabs (Trade Analyzer, Analytics, Roster)
+    df['FP'] = (
+        (df['G'] * val_G) + (df['A'] * val_A) + (df['PPP'] * val_PPP) + 
+        (df['SHP'] * val_SHP) + (df['SOG'] * val_SOG) + (df['Hits'] * val_Hit) + 
+        (df['BkS'] * val_BkS) + (df['W'] * val_W) + (df['GA'] * val_GA) + 
+        (df['Svs'] * val_Svs) + (df['SO'] * val_SO) + (df['OTL'] * val_OTL)
+    ).round(1)
+
+    # --- CALCULATE ROS (Rest of Season) PROJECTIONS ---
+    # Formula: (Current Stat / GP) * (82 - GP)
+    # We add this as a hidden column for the trade analyzer to use
+    df['GamesRemaining'] = 82 - df['GP']
+    df['ROS_FP'] = (df['FP'] / df['GP']).fillna(0) * df['GamesRemaining']
+
+    # --- TABS ---
+    tab_home, tab_analytics, tab_tools, tab_fantasy = st.tabs(["🏠 Home", "📊 Data & Analytics", "🛠️ Fantasy Tools", "⚔️ My Fantasy Team"])
 
     # ================= TAB 1: HOME =================
     with tab_home:
-        # 1. SCHEDULE
         st.header("📅 Today's Games")
         schedule = load_schedule()
         if not schedule:
@@ -75,13 +107,10 @@ else:
                             """, unsafe_allow_html=True)
         st.divider()
 
-        # --- SPLIT LAYOUT: SOS (Left) | NEWS (Right) ---
         col_sos, col_news = st.columns([2, 1])
 
         with col_sos:
             st.header("💪 Strength of Schedule")
-            st.caption("Green = You are favored. Red = Opponent is favored.")
-            
             with st.spinner("Calculating matchup difficulty..."):
                 sos_matrix, standings = get_weekly_schedule_matrix()
             
@@ -102,16 +131,13 @@ else:
 
                 styled_sos = sos_matrix.style.apply(lambda row: [color_sos(val, row.name) for val in row], axis=1)
                 styled_sos = styled_sos.set_properties(**{'text-align': 'center'})
-                
-                # Render SOS Table
-                st.dataframe(styled_sos, use_container_width=True, height=500)
+                st.dataframe(styled_sos, use_container_width=False, height=500, width=800)
             else:
                 st.info("Strength of Schedule data unavailable.")
 
         with col_news:
             st.header("📰 Latest News")
             news = load_nhl_news()
-            
             if news:
                 for article in news:
                     st.markdown(f"""
@@ -122,31 +148,6 @@ else:
                     """, unsafe_allow_html=True)
             else:
                 st.info("No news available currently.")
-
-        st.divider()
-
-        # 3. WEEKLY CHARTS
-        st.header("🔥 Hot This Week (Last 7 Days)")
-        with st.spinner("Loading weekly trends..."):
-            df_weekly = load_weekly_leaders()
-        
-        if not df_weekly.empty:
-            def make_mini_chart(data, x_col, y_col, color, title):
-                sorted_data = data.sort_values(y_col, ascending=False).head(5)
-                chart = alt.Chart(sorted_data).mark_bar(cornerRadiusEnd=4).encode(
-                    x=alt.X(f'{y_col}:Q', title=None), 
-                    y=alt.Y(f'{x_col}:N', sort='-x', title=None), 
-                    color=alt.value(color), tooltip=[x_col, y_col]
-                ).properties(title=title, height=200)
-                text = chart.mark_text(align='left', dx=2).encode(text=f'{y_col}:Q')
-                return (chart + text)
-
-            c1, c2 = st.columns(2)
-            with c1: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
-            with c2: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
-            c3, c4 = st.columns(2)
-            with c3: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
-            with c4: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
 
     # ================= TAB 2: ANALYTICS =================
     with tab_analytics:
@@ -166,59 +167,7 @@ else:
         st.divider()
         st.subheader("League Summary Table")
         
-        with st.expander("⚙️ Fantasy Point Settings", expanded=False):
-            c_s1, c_s2, c_s3, c_s4, c_s5, c_s6 = st.columns(6)
-            c_g1, c_g2, c_g3, c_g4, c_g5, c_g6 = st.columns(6)
-            val_G = c_s1.number_input("Goals", value=2.0)
-            val_A = c_s2.number_input("Assists", value=1.0)
-            val_PPP = c_s3.number_input("PPP", value=0.5)
-            val_SHP = c_s4.number_input("SHP", value=0.5)
-            val_SOG = c_s5.number_input("SOG", value=0.1)
-            val_Hit = c_s6.number_input("Hits", value=0.1)
-            val_BkS = c_g1.number_input("Blocks", value=0.5)
-            val_W = c_g2.number_input("Wins", value=4.0)
-            val_GA = c_g3.number_input("GA", value=-2.0)
-            val_Svs = c_g4.number_input("Saves", value=0.2)
-            val_SO = c_g5.number_input("Shutouts", value=3.0)
-            val_OTL = c_g6.number_input("OTL", value=1.0)
-
-        df['FP'] = (
-            (df['G'] * val_G) + (df['A'] * val_A) + (df['PPP'] * val_PPP) + 
-            (df['SHP'] * val_SHP) + (df['SOG'] * val_SOG) + (df['Hits'] * val_Hit) + 
-            (df['BkS'] * val_BkS) + (df['W'] * val_W) + (df['GA'] * val_GA) + 
-            (df['Svs'] * val_Svs) + (df['SO'] * val_SO) + (df['OTL'] * val_OTL)
-        ).round(1)
-
-        cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType']]
-        df = df[cols]
-
-        column_config = {
-            "ID": None,
-            "Player": st.column_config.TextColumn("Player", pinned=True),
-            "FP": st.column_config.NumberColumn("FP", format="%.1f"),
-            "Team": st.column_config.TextColumn("Team"),
-            "Pos": st.column_config.TextColumn("Pos"),
-            "GP": st.column_config.NumberColumn("GP", format="%.0f"),
-            "G": st.column_config.NumberColumn("G", format="%.0f"),
-            "A": st.column_config.NumberColumn("A", format="%.0f"),
-            "Pts": st.column_config.NumberColumn("Pts", format="%.0f"),
-            "PPP": st.column_config.NumberColumn("PPP", format="%.0f"),
-            "SHP": st.column_config.NumberColumn("SHP", format="%.0f"),
-            "SOG": st.column_config.NumberColumn("SOG", format="%.0f"),
-            "Hits": st.column_config.NumberColumn("Hits", format="%.0f"),
-            "BkS": st.column_config.NumberColumn("BkS", format="%.0f"),
-            "W": st.column_config.NumberColumn("W", format="%.0f"),
-            "GA": st.column_config.NumberColumn("GA", format="%.0f"),
-            "Svs": st.column_config.NumberColumn("Svs", format="%.0f"),
-            "SO": st.column_config.NumberColumn("SO", format="%.0f"),
-            "SAT%": st.column_config.NumberColumn("SAT%", format="%.1f%%"),
-            "USAT%": st.column_config.NumberColumn("USAT%", format="%.1f%%"),
-            "SV%": st.column_config.NumberColumn("SV%", format="%.3f"),
-            "GAA": st.column_config.NumberColumn("GAA", format="%.2f"),
-            "GSAA": st.column_config.NumberColumn("GSAA", format="%.2f"),
-            "TOI": st.column_config.TextColumn("TOI")
-        }
-
+        # Filter
         with st.expander("Filter Options"):
             c1, c2 = st.columns(2)
             teams = sorted(df['Team'].unique())
@@ -230,6 +179,7 @@ else:
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
 
+        # --- HIGHLIGHT & FORMAT ---
         def highlight_my_team(row):
             return ['background-color: #574d28'] * len(row) if row['Player'] in st.session_state.my_roster else [''] * len(row)
 
@@ -242,9 +192,101 @@ else:
         styled_df = styled_df.format("{:.2f}", subset=['GAA', 'GSAA'])
         styled_df = styled_df.format("{:.3f}", subset=['SV%'])
 
-        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_config=column_config)
+        cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining']]
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_order=cols)
 
-    # ================= TAB 3: FANTASY =================
+    # ================= TAB 3: FANTASY TOOLS (TRADE CALCULATOR) =================
+    with tab_tools:
+        st.header("⚖️ Trade Analyzer")
+        st.info("Compare players based on their **Rest of Season (ROS)** projection.")
+        
+        # Layout: Two Columns for Input
+        c1, c_mid, c2 = st.columns([1, 0.2, 1])
+        
+        with c1:
+            st.subheader("📤 Sending (Your Team)")
+            sending = st.multiselect("Select Players to Trade Away", df['Player'].unique(), key="send")
+            
+        with c2:
+            st.subheader("📥 Receiving (Their Team)")
+            receiving = st.multiselect("Select Players to Receive", df['Player'].unique(), key="recv")
+
+        if sending and receiving:
+            st.divider()
+            
+            # --- CALCULATIONS ---
+            df_send = df[df['Player'].isin(sending)]
+            df_recv = df[df['Player'].isin(receiving)]
+            
+            # Sum of ROS Fantasy Points
+            send_fp_total = df_send['ROS_FP'].sum()
+            recv_fp_total = df_recv['ROS_FP'].sum()
+            diff = recv_fp_total - send_fp_total
+            
+            # --- THE VERDICT ---
+            st.subheader("The Verdict")
+            
+            # Determine color and message
+            if diff > 0:
+                st.markdown(f"""
+                <div class="trade-win">
+                    <h3>✅ You Win!</h3>
+                    <p>This trade improves your team by approximately <b>+{diff:.1f} Fantasy Points</b> over the rest of the season.</p>
+                </div>
+                """, unsafe_allow_html=True)
+            elif diff < 0:
+                st.markdown(f"""
+                <div class="trade-loss">
+                    <h3>❌ You Lose.</h3>
+                    <p>This trade hurts your team. You lose approximately <b>{diff:.1f} Fantasy Points</b> over the rest of the season.</p>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.info("⚠️ This trade is perfectly even.")
+
+            # --- STAT IMPACT TABLE ---
+            st.markdown("#### Projected Net Impact (Rest of Season)")
+            
+            # Helper to calculate ROS sum for a specific stat column
+            def get_ros_sum(dataframe, col):
+                # (Stat / GP) * Remaining Games
+                return ((dataframe[col] / dataframe['GP']) * dataframe['GamesRemaining']).sum()
+
+            # Stats to compare
+            stat_list = ['G', 'A', 'PPP', 'SOG', 'Hits', 'BkS']
+            impact_data = {}
+            
+            for stat in stat_list:
+                val_send = get_ros_sum(df_send, stat)
+                val_recv = get_ros_sum(df_recv, stat)
+                net = val_recv - val_send
+                impact_data[stat] = net
+
+            # Display Impact as metrics
+            i1, i2, i3, i4, i5, i6 = st.columns(6)
+            cols = [i1, i2, i3, i4, i5, i6]
+            
+            for i, stat in enumerate(stat_list):
+                val = impact_data[stat]
+                cols[i].metric(
+                    label=f"Net {stat}", 
+                    value=f"{val:+.0f}", # Force sign (+/-)
+                    delta_color="normal"
+                )
+
+            # --- SIDE BY SIDE COMPARISON ---
+            st.markdown("#### Player Comparison")
+            c_left, c_right = st.columns(2)
+            
+            with c_left:
+                st.caption("Sending")
+                st.dataframe(df_send[['Player', 'FP', 'ROS_FP', 'G', 'A']], hide_index=True)
+            with c_right:
+                st.caption("Receiving")
+                st.dataframe(df_recv[['Player', 'FP', 'ROS_FP', 'G', 'A']], hide_index=True)
+
+
+    # ================= TAB 4: MY ROSTER =================
     with tab_fantasy:
         st.header("⚔️ My Roster")
         col_up, _ = st.columns([1, 2])
@@ -268,7 +310,11 @@ else:
             c3.metric("Total FP", f"{team_df['FP'].sum():,.1f}")
             c4.metric("Goalie Wins", int(team_df['W'].sum()))
             
+            # Apply formatting
             styled_team = team_df.style.format("{:.0f}", subset=[c for c in whole_num_cols if c in team_df.columns])
             styled_team = styled_team.format("{:.1f}", subset=['FP'])
-            st.dataframe(styled_team, use_container_width=True, hide_index=True, column_config=column_config)
+            
+            cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining']]
+            st.dataframe(styled_team, use_container_width=True, hide_index=True, column_order=cols)
+
 
