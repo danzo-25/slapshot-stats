@@ -12,18 +12,16 @@ if "trade_send" not in st.session_state: st.session_state.trade_send = []
 if "trade_recv" not in st.session_state: st.session_state.trade_recv = []
 
 # --- CALLBACKS ---
-def add_from_search(side):
+def add_player_from_search(side):
     """
     Called when the user selects a name from the dynamic dropdown.
-    1. Identifies the player selected.
-    2. Adds to list.
-    3. Clears the Search Bar to reset the process.
     """
     # Identify keys based on side
     search_key = "search_send" if side == 'send' else "search_recv"
     select_key = "select_send" if side == 'send' else "select_recv"
     
-    player = st.session_state[select_key]
+    # Get the value from the selectbox state
+    player = st.session_state.get(select_key)
     
     # Only act if a real player was selected (ignore default placeholder)
     if player and player != "Select player...":
@@ -36,7 +34,7 @@ def add_from_search(side):
         
         # CLEAR inputs to reset state
         st.session_state[search_key] = "" 
-        st.session_state[select_key] = "Select player..." # Reset dropdown
+        st.session_state[select_key] = None # Reset dropdown to empty
 
 def remove_player(player, side):
     target = st.session_state.trade_send if side == 'send' else st.session_state.trade_recv
@@ -183,10 +181,10 @@ else:
         cols = ['ID', 'Player', 'Team', 'Pos', 'FP', 'ROS_FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining'] and not c.startswith('ROS_')]
         st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_order=cols)
 
-    # ================= TAB 3: FANTASY TOOLS (SEARCH + DROPDOWN COMBO) =================
+    # ================= TAB 3: FANTASY TOOLS (SEARCH BOX) =================
     with tab_tools:
         st.header("⚖️ Trade Analyzer")
-        st.info("Type in the search bar. A dropdown will appear with the top 3 matches. Select a player to add them.")
+        st.info("Search players to add them. Results appear as buttons below the search bar.")
         
         all_players = sorted(df['Player'].unique().tolist())
         
@@ -195,21 +193,18 @@ else:
         # --- LEFT: SENDING ---
         with c_left:
             st.subheader("📤 Sending")
-            # 1. Search Bar
-            search_s = st.text_input("Search (Sending)", key="search_send", placeholder="Type name (e.g. McDavid)")
+            # 1. Search Bar (Text)
+            s_val = st.text_input("Search (Sending)", key="search_send", placeholder="Type name (e.g. McDavid)")
             
-            # 2. Dynamic Dropdown (Only appears if text exists)
-            if search_s:
-                # Filter logic: Top 3 matches
-                matches = [p for p in all_players if search_s.lower() in p.lower()][:3]
-                
+            # 2. Dynamic Dropdown (Appears when text exists)
+            if s_val:
+                matches = [p for p in all_players if s_val.lower() in p.lower()][:3]
                 if matches:
-                    # Show selectbox with these specific options
                     st.selectbox(
                         "Select to Add:", 
                         options=["Select player..."] + matches, 
                         key="select_send", 
-                        on_change=add_player_from_search, 
+                        on_change=add_player_from_search, # Correct callback name
                         args=('send',),
                         label_visibility="collapsed"
                     )
@@ -229,16 +224,16 @@ else:
         # --- RIGHT: RECEIVING ---
         with c_right:
             st.subheader("📥 Receiving")
-            search_r = st.text_input("Search (Receiving)", key="search_recv", placeholder="Type name...")
+            r_val = st.text_input("Search (Receiving)", key="search_recv", placeholder="Type name...")
             
-            if search_r:
-                matches = [p for p in all_players if search_r.lower() in p.lower()][:3]
+            if r_val:
+                matches = [p for p in all_players if r_val.lower() in p.lower()][:3]
                 if matches:
                     st.selectbox(
                         "Select to Add:", 
                         options=["Select player..."] + matches, 
                         key="select_recv", 
-                        on_change=add_player_from_search, 
+                        on_change=add_player_from_search, # Correct callback name
                         args=('recv',),
                         label_visibility="collapsed"
                     )
@@ -254,39 +249,53 @@ else:
                         remove_player(p, 'recv')
                         st.rerun()
 
-        # --- CALCULATIONS (Same as before) ---
+        # --- CALCULATIONS ---
         if st.session_state.trade_send or st.session_state.trade_recv:
             st.divider()
+            
             df_send = df[df['Player'].isin(st.session_state.trade_send)]
             df_recv = df[df['Player'].isin(st.session_state.trade_recv)]
             
+            # Verdict Logic
             if not df_send.empty and not df_recv.empty:
                 send_fp = df_send['ROS_FP'].sum()
                 recv_fp = df_recv['ROS_FP'].sum()
                 diff = recv_fp - send_fp
+                
                 st.subheader("The Verdict")
-                if diff > 0: st.markdown(f"""<div class="trade-box trade-win"><h2>✅ You Win!</h2><p style="font-size: 1.2em;">Projected Gain: <b>+{diff:.1f} FP</b> (ROS)</p></div>""", unsafe_allow_html=True)
-                elif diff < 0: st.markdown(f"""<div class="trade-box trade-loss"><h2>❌ You Lose.</h2><p style="font-size: 1.2em;">Projected Loss: <b>{diff:.1f} FP</b> (ROS)</p></div>""", unsafe_allow_html=True)
-                else: st.info("⚠️ This trade is perfectly even.")
+                if diff > 0:
+                    st.markdown(f"""<div class="trade-box trade-win"><h2>✅ You Win!</h2><p style="font-size: 1.2em;">Projected Gain: <b>+{diff:.1f} FP</b> (ROS)</p></div>""", unsafe_allow_html=True)
+                elif diff < 0:
+                    st.markdown(f"""<div class="trade-box trade-loss"><h2>❌ You Lose.</h2><p style="font-size: 1.2em;">Projected Loss: <b>{diff:.1f} FP</b> (ROS)</p></div>""", unsafe_allow_html=True)
+                else:
+                    st.info("⚠️ This trade is perfectly even.")
 
+            # Stats Summary
             st.markdown("#### Projected Totals (Rest of Season)")
             stats_map = {'Fantasy Points': 'ROS_FP', 'Goals': 'ROS_G', 'Assists': 'ROS_A', 'Points': 'ROS_Pts', 'PPP': 'ROS_PPP', 'SOG': 'ROS_SOG', 'Hits': 'ROS_Hits', 'Blocks': 'ROS_BkS', 'Wins': 'ROS_W'}
+            
             summary_data = []
             for label, col in stats_map.items():
                 if col in df.columns:
-                    summary_data.append({'Stat': label, 'Sending': df_send[col].sum(), 'Receiving': df_recv[col].sum(), 'Net': df_recv[col].sum() - df_send[col].sum()})
+                    val_s = df_send[col].sum()
+                    val_r = df_recv[col].sum()
+                    diff_val = val_r - val_s
+                    summary_data.append({'Stat': label, 'Sending': val_s, 'Receiving': val_r, 'Net': diff_val})
             
             summary_df = pd.DataFrame(summary_data).set_index('Stat')
+
             def highlight_winner(row):
-                s, r = row['Sending'], row['Receiving']
+                s_val = row['Sending']
+                r_val = row['Receiving']
                 green, red = 'color: #4caf50; font-weight: bold', 'color: #f44336; font-weight: bold'
-                if r > s: return ['', red, green, green]
-                elif s > r: return ['', green, red, red]
+                if r_val > s_val: return ['', red, green, green]
+                elif s_val > r_val: return ['', green, red, red]
                 return ['', '', '', '']
 
             styled_summary = summary_df.style.format("{:+.1f}", subset=['Net']).format("{:.1f}", subset=['Sending', 'Receiving']).apply(highlight_winner, axis=1)
             st.dataframe(styled_summary, use_container_width=True)
 
+            # Individual Players
             st.caption("Individual Player Projections (ROS)")
             full_list = pd.concat([df_send, df_recv])
             if not full_list.empty:
@@ -323,4 +332,3 @@ else:
             styled_team = styled_team.format("{:.1f}", subset=['FP'])
             cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining']]
             st.dataframe(styled_team, use_container_width=True, hide_index=True, column_order=cols)
-
