@@ -1,51 +1,98 @@
 import streamlit as st
 import pandas as pd
-from data_loader import load_nhl_data, get_player_game_log
+from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders
 
 st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
-st.title("🏒 Slapshot Stats")
+st.title("🏒 NHL 2025-26 Dashboard")
 
-# --- LOAD DATA ---
+# --- LOAD MAIN DATA ---
+# We load the big dataset once to use across tabs
 with st.spinner('Loading NHL Data...'):
     df = load_nhl_data()
 
 if df.empty:
     st.warning("No data found. API might be down.")
 else:
-    # Check if ID exists (Safety Check)
-    if 'ID' not in df.columns:
-        st.error("Error: Player IDs missing. Please check data_loader.py")
-        st.stop()
-
     # --- TABS ---
-    tab1, tab2 = st.tabs(["📊 Summary & Trends", "⚔️ My Fantasy Team"])
-
-    column_config = {
-        # --- FIX IS HERE: Set to None to hide it ---
-        "ID": None, 
-        # -------------------------------------------
-        "Player": st.column_config.TextColumn("Player", pinned=True),
-        "Team": st.column_config.TextColumn("Team", help="Team"),
-        "Pos": st.column_config.TextColumn("Pos", help="Position"),
-        "GP": st.column_config.NumberColumn("GP", help="Games Played"),
-        "G": st.column_config.NumberColumn("G", help="Goals"),
-        "A": st.column_config.NumberColumn("A", help="Assists"),
-        "Pts": st.column_config.NumberColumn("Pts", help="Points"),
-        "W": st.column_config.NumberColumn("W", help="Wins"),
-        "SV%": st.column_config.NumberColumn("SV%", help="Save %", format="%.3f"),
-        "GAA": st.column_config.NumberColumn("GAA", help="GAA", format="%.2f"),
-        "TOI": st.column_config.TextColumn("TOI", help="Time On Ice")
-    }
+    tab_home, tab_analytics, tab_fantasy = st.tabs(["🏠 Home", "📊 Data & Analytics", "⚔️ My Fantasy Team"])
 
     # ==========================================
-    # TAB 1: SUMMARY & TRENDS
+    # TAB 1: HOME (Schedule + Weekly Trends)
     # ==========================================
-    with tab1:
+    with tab_home:
+        # --- SECTION A: TODAY'S SCHEDULE ---
+        st.header("📅 Today's Games")
+        
+        schedule = load_schedule()
+        
+        if not schedule:
+            st.info("No games scheduled for today.")
+        else:
+            # Create rows of 3 games each
+            for i in range(0, len(schedule), 3):
+                cols = st.columns(3)
+                for j in range(3):
+                    if i + j < len(schedule):
+                        game = schedule[i+j]
+                        with cols[j]:
+                            with st.container(border=True):
+                                c1, c2, c3 = st.columns([1, 0.5, 1])
+                                with c1:
+                                    st.image(game['away_logo'], width=50)
+                                    st.caption(game['away'])
+                                with c2:
+                                    st.markdown(f"**VS**")
+                                with c3:
+                                    st.image(game['home_logo'], width=50)
+                                    st.caption(game['home'])
+                                st.markdown(f"<div style='text-align: center; font-weight: bold;'>{game['time']}</div>", unsafe_allow_html=True)
+
+        st.divider()
+
+        # --- SECTION B: HOT THIS WEEK ---
+        st.header("🔥 Hot This Week (Last 7 Days)")
+        
+        with st.spinner("Loading weekly trends..."):
+            df_weekly = load_weekly_leaders()
+        
+        if not df_weekly.empty:
+            # Top 4 Charts
+            c1, c2 = st.columns(2)
+            
+            with c1:
+                st.subheader("Top Goal Scorers")
+                top_g = df_weekly.sort_values('G', ascending=False).head(5)
+                st.bar_chart(top_g.set_index('Player')['G'], color="#ff4b4b")
+
+            with c2:
+                st.subheader("Top Points Leaders")
+                top_pts = df_weekly.sort_values('Pts', ascending=False).head(5)
+                st.bar_chart(top_pts.set_index('Player')['Pts'], color="#0083b8")
+            
+            c3, c4 = st.columns(2)
+            
+            with c3:
+                st.subheader("Most Shots on Goal")
+                top_sog = df_weekly.sort_values('SOG', ascending=False).head(5)
+                st.bar_chart(top_sog.set_index('Player')['SOG'], color="#ffa600")
+
+            with c4:
+                st.subheader("Power Play Points")
+                top_ppp = df_weekly.sort_values('PPP', ascending=False).head(5)
+                st.bar_chart(top_ppp.set_index('Player')['PPP'], color="#58508d")
+
+        else:
+            st.info("No weekly data available yet.")
+
+
+    # ==========================================
+    # TAB 2: DATA & ANALYTICS (Old Summary Tab)
+    # ==========================================
+    with tab_analytics:
         st.header("📈 Breakout Detector")
         st.info("Select a player to see if they are heating up (Rolling 5-Game Average).")
 
         # 1. Player Selector
-        # Only select Skaters for trend analysis initially to keep it simple
         skater_options = df[df['PosType'] == 'Skater'].sort_values('Pts', ascending=False)
         player_dict = dict(zip(skater_options['Player'], skater_options['ID']))
         
@@ -57,7 +104,6 @@ else:
                 game_log = get_player_game_log(pid)
             
             if not game_log.empty:
-                # Rolling Average Calculation
                 game_log['Rolling Points (Last 5)'] = game_log['points'].rolling(window=5, min_periods=1).mean()
                 chart_data = game_log[['gameDate', 'points', 'Rolling Points (Last 5)']].set_index('gameDate')
                 
@@ -70,6 +116,21 @@ else:
 
         st.subheader("League Summary Table")
         
+        column_config = {
+            "ID": None,
+            "Player": st.column_config.TextColumn("Player", pinned=True),
+            "Team": st.column_config.TextColumn("Team", help="Team"),
+            "Pos": st.column_config.TextColumn("Pos", help="Position"),
+            "GP": st.column_config.NumberColumn("GP", help="Games Played"),
+            "G": st.column_config.NumberColumn("G", help="Goals"),
+            "A": st.column_config.NumberColumn("A", help="Assists"),
+            "Pts": st.column_config.NumberColumn("Pts", help="Points"),
+            "W": st.column_config.NumberColumn("W", help="Wins"),
+            "SV%": st.column_config.NumberColumn("SV%", help="Save %", format="%.3f"),
+            "GAA": st.column_config.NumberColumn("GAA", help="GAA", format="%.2f"),
+            "TOI": st.column_config.TextColumn("TOI", help="Time On Ice")
+        }
+
         with st.expander("Filter Options"):
             c1, c2 = st.columns(2)
             with c1:
@@ -86,9 +147,9 @@ else:
         st.dataframe(filt_df, use_container_width=True, hide_index=True, height=500, column_config=column_config)
 
     # ==========================================
-    # TAB 2: MY FANTASY TEAM
+    # TAB 3: MY FANTASY TEAM
     # ==========================================
-    with tab2:
+    with tab_fantasy:
         st.header("⚔️ My Roster")
         
         col_up, _ = st.columns([1, 2])
@@ -106,7 +167,6 @@ else:
 
         if my_team:
             team_df = df[df['Player'].isin(my_team)]
-            
             st.download_button("💾 Save Roster", team_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
             
             st.markdown("### Team Totals")
@@ -116,6 +176,7 @@ else:
             c3.metric("Goalie Wins", int(team_df['W'].sum()))
             c4.metric("Goalie SO", int(team_df['SO'].sum()))
             
+            # Reuse column config from above
             st.dataframe(team_df, use_container_width=True, hide_index=True, column_config=column_config)
 
 
