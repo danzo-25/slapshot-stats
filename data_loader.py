@@ -1,22 +1,31 @@
+You are absolutely right. Since today is December 10, 2025, the 2025-2026 season is well underway! The code I gave you was hardcoded to the previous season (20242025).
+
+To fix this, we just need to update the seasonId in data_loader.py from 20242025 to 20252026.
+The Fix: data_loader.py
+
+Replace your entire data_loader.py with this updated version. I have changed the cayenneExp line to target the 2025-2026 season.
+Python
+
 import requests
 import pandas as pd
 import streamlit as st
 
 def load_nhl_data():
     """
-    Fetches 2024-2025 Regular Season stats for all skaters.
+    Fetches 2025-2026 Regular Season stats for all skaters.
     Endpoint: https://api.nhle.com/stats/rest/en/skater/summary
     """
     url = "https://api.nhle.com/stats/rest/en/skater/summary"
 
-    # Simplified params to minimize errors
+    # --- UPDATED PARAMS FOR 2025-2026 SEASON ---
     params = {
         "isAggregate": "false",
         "isGame": "false",
         "sort": '[{"property":"points","direction":"DESC"}]',
         "start": 0,
         "limit": -1,
-        "cayenneExp": "seasonId=20242025 and gameTypeId=2"
+        # UPDATED HERE: seasonId=20252026
+        "cayenneExp": "seasonId=20252026 and gameTypeId=2"
     }
 
     try:
@@ -31,17 +40,11 @@ def load_nhl_data():
 
         df = pd.DataFrame(players_list)
 
-        # --- DEBUGGING / SAFETY ---
-        # If the expected columns are missing, this helps us see what we actually got
-        # Uncomment the line below to see raw columns in your app if needed:
-        # st.write("Raw Columns:", df.columns.tolist())
-
         # 1. Standardize Column Names
-        # We use a mapping to rename whatever the API gives us to our standard names
         rename_map = {
             'skaterFullName': 'Player',
             'teamAbbrev': 'Team',
-            'teamName': 'Team',      # Fallback
+            'teamName': 'Team',
             'positionCode': 'Pos',
             'gamesPlayed': 'GP',
             'goals': 'G',
@@ -57,13 +60,11 @@ def load_nhl_data():
         df = df.rename(columns=rename_map)
 
         # 2. Ensure Critical Columns Exist
-        # If 'Team' or 'Pos' are missing after rename, create them with defaults to prevent crash
         if 'Team' not in df.columns:
             df['Team'] = 'N/A'
         if 'Pos' not in df.columns:
             df['Pos'] = 'N/A'
         if 'Player' not in df.columns:
-            # Fallback for player name if skaterFullName is missing
             df['Player'] = df['lastName'] if 'lastName' in df.columns else 'Unknown'
 
         # 3. Ensure Numeric Columns
@@ -72,7 +73,6 @@ def load_nhl_data():
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             else:
-                # If a stat column is missing, just fill it with 0
                 df[col] = 0
 
         # 4. Final Selection
@@ -82,5 +82,6 @@ def load_nhl_data():
     except Exception as e:
         st.error(f"Error connecting to NHL Stats API: {e}")
         return pd.DataFrame()
+
 
 
