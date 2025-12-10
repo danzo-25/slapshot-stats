@@ -13,7 +13,7 @@ if "trade_recv" not in st.session_state: st.session_state.trade_recv = []
 
 # --- CALLBACKS ---
 def add_player_from_select(side):
-    """Adds player from selectbox and clears it by resetting session state key to None."""
+    """Adds player from selectbox and clears it."""
     key = "sb_send" if side == 'send' else "sb_recv"
     player = st.session_state.get(key)
     
@@ -21,11 +21,9 @@ def add_player_from_select(side):
         target = st.session_state.trade_send if side == 'send' else st.session_state.trade_recv
         other = st.session_state.trade_recv if side == 'send' else st.session_state.trade_send
         
-        # Add if not duplicate
         if player not in target and player not in other:
             target.append(player)
         
-        # Reset the widget to blank
         st.session_state[key] = None
 
 def remove_player(player, side):
@@ -173,10 +171,10 @@ else:
         cols = ['ID', 'Player', 'Team', 'Pos', 'FP', 'ROS_FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining'] and not c.startswith('ROS_')]
         st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_order=cols)
 
-    # ================= TAB 3: FANTASY TOOLS (DROPDOWN) =================
+    # ================= TAB 3: FANTASY TOOLS (FULL STATS) =================
     with tab_tools:
         st.header("⚖️ Trade Analyzer")
-        st.info("Select players to compare their **Rest of Season (ROS)** value.")
+        st.info("Calculations use current stats and **Rest of Season (ROS)** projections.")
         
         all_players = sorted(df['Player'].unique().tolist())
         c1, c_mid, c2 = st.columns([1, 0.1, 1])
@@ -184,13 +182,13 @@ else:
         # --- LEFT: SENDING ---
         with c1:
             st.subheader("📤 Sending")
-            # Dynamic Filter: Don't show players already in Recv
+            # Filter: Don't show players already in Recv
             opts_s = [p for p in all_players if p not in st.session_state.trade_recv]
             
             st.selectbox(
                 "Add Player", 
                 options=opts_s, 
-                index=None, # Makes it blank initially
+                index=None, 
                 placeholder="Type to add player...", 
                 key="sb_send", 
                 on_change=add_player_from_select, 
@@ -240,9 +238,9 @@ else:
                 recv_fp = df_recv['ROS_FP'].sum()
                 diff = recv_fp - send_fp
                 st.subheader("The Verdict")
-                if diff > 0: st.markdown(f"""<div class="trade-box trade-win"><h2>✅ You Win!</h2><p style="font-size: 1.2em;">Projected Gain: <b>+{diff:.1f} FP</b> (ROS)</p></div>""", unsafe_allow_html=True)
-                elif diff < 0: st.markdown(f"""<div class="trade-box trade-loss"><h2>❌ You Lose.</h2><p style="font-size: 1.2em;">Projected Loss: <b>{diff:.1f} FP</b> (ROS)</p></div>""", unsafe_allow_html=True)
-                else: st.info("⚠️ This trade is perfectly even.")
+                if diff > 0: st.markdown(f"""<div class="trade-box trade-win"><h2>✅ You Win!</h2><p>Projected Gain: <b>+{diff:.1f} FP</b> (ROS)</p></div>""", unsafe_allow_html=True)
+                elif diff < 0: st.markdown(f"""<div class="trade-box trade-loss"><h2>❌ You Lose.</h2><p>Projected Loss: <b>{diff:.1f} FP</b> (ROS)</p></div>""", unsafe_allow_html=True)
+                else: st.info("Trade is even.")
 
             st.markdown("#### Projected Totals (Rest of Season)")
             stats_map = {'Fantasy Points': 'ROS_FP', 'Goals': 'ROS_G', 'Assists': 'ROS_A', 'Points': 'ROS_Pts', 'PPP': 'ROS_PPP', 'SOG': 'ROS_SOG', 'Hits': 'ROS_Hits', 'Blocks': 'ROS_BkS', 'Wins': 'ROS_W'}
@@ -252,8 +250,7 @@ else:
                 if col in df.columns:
                     val_s = df_send[col].sum()
                     val_r = df_recv[col].sum()
-                    diff_val = val_r - val_s
-                    summary_data.append({'Stat': label, 'Sending': val_s, 'Receiving': val_r, 'Net': diff_val})
+                    summary_data.append({'Stat': label, 'Sending': val_s, 'Receiving': val_r, 'Net': val_r - val_s})
             
             summary_df = pd.DataFrame(summary_data).set_index('Stat')
 
@@ -267,13 +264,44 @@ else:
             styled_summary = summary_df.style.format("{:+.1f}", subset=['Net']).format("{:.1f}", subset=['Sending', 'Receiving']).apply(highlight_winner, axis=1)
             st.dataframe(styled_summary, use_container_width=True)
 
-            st.caption("Individual Player Projections (ROS)")
+            # --- INDIVIDUAL PLAYERS (CURRENT + ROS) ---
+            st.caption("Individual Player Stats (Current & Projected)")
             full_list = pd.concat([df_send, df_recv])
             if not full_list.empty:
                 full_list['Side'] = full_list['Player'].apply(lambda x: 'Receiving' if x in st.session_state.trade_recv else 'Sending')
-                cols_to_show = ['Side', 'Player', 'Team', 'Pos', 'ROS_FP', 'ROS_G', 'ROS_A', 'ROS_Pts', 'ROS_PPP', 'ROS_Hits']
+                
+                # --- NEW COLUMNS LIST ---
+                # We show current (G, A, Pts) and ROS (ROS_G, ROS_A, ROS_Pts) side-by-side
+                cols_to_show = [
+                    'Side', 'Player', 'Team', 'Pos', 
+                    'FP', 'ROS_FP',
+                    'G', 'ROS_G',
+                    'A', 'ROS_A',
+                    'Pts', 'ROS_Pts',
+                    'PPP', 'ROS_PPP',
+                    'SOG', 'ROS_SOG',
+                    'Hits', 'ROS_Hits'
+                ]
+                
                 final_cols = [c for c in cols_to_show if c in full_list.columns]
-                st.dataframe(full_list[final_cols].style.format("{:.1f}", subset=[c for c in final_cols if 'ROS_' in c]), use_container_width=True, hide_index=True)
+                
+                # Apply Formatting:
+                # 0 decimals for Current Stats
+                current_stats = ['G', 'A', 'Pts', 'PPP', 'SOG', 'Hits', 'BkS']
+                valid_current = [c for c in current_stats if c in full_list.columns]
+                
+                # 1 decimal for Projected Stats + FP
+                proj_stats = [c for c in final_cols if 'ROS_' in c or 'FP' in c]
+                
+                styled_player_table = full_list[final_cols].style \
+                    .format("{:.0f}", subset=valid_current) \
+                    .format("{:.1f}", subset=proj_stats)
+
+                st.dataframe(
+                    styled_player_table, 
+                    use_container_width=True, 
+                    hide_index=True
+                )
 
     # ================= TAB 4: MY ROSTER =================
     with tab_fantasy:
@@ -283,8 +311,7 @@ else:
         if uploaded_file:
             try:
                 udf = pd.read_csv(uploaded_file)
-                if "Player" in udf.columns: 
-                    st.session_state.my_roster = [p for p in udf["Player"] if p in df['Player'].values]
+                if "Player" in udf.columns: st.session_state.my_roster = [p for p in udf["Player"] if p in df['Player'].values]
             except: pass
 
         selected_players = st.multiselect("Search Players:", df['Player'].unique(), default=st.session_state.my_roster)
