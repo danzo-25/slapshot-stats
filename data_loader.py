@@ -10,6 +10,7 @@ def fetch_data(endpoint, report_type, sort_key, override_cayenne=None, aggregate
     if override_cayenne:
         cayenne_exp = override_cayenne
     else:
+        # User specified 2025-2026 Season
         cayenne_exp = "seasonId=20252026 and gameTypeId=2"
 
     params = {
@@ -29,7 +30,6 @@ def fetch_data(endpoint, report_type, sort_key, override_cayenne=None, aggregate
         return pd.DataFrame()
 
 # --- MAIN DATA LOADER (CACHED) ---
-# ttl=3600 means "Refresh data every 1 hour"
 @st.cache_data(ttl=3600)
 def load_nhl_data():
     # 1. Skaters
@@ -102,7 +102,6 @@ def load_nhl_data():
     
     return df_combined[final_cols]
 
-# Cache specific player logs
 @st.cache_data(ttl=3600)
 def get_player_game_log(player_id):
     url = f"https://api-web.nhle.com/v1/player/{player_id}/game-log/20252026/2"
@@ -117,8 +116,9 @@ def get_player_game_log(player_id):
         return df_log.sort_values(by='gameDate')
     except: return pd.DataFrame()
 
-# Cache schedule (refresh every 1 hour)
-@st.cache_data(ttl=3600)
+# --- SCHEDULE FETCHER (Now with Live Scores) ---
+# Low TTL (60 seconds) so live scores update frequently
+@st.cache_data(ttl=60)
 def load_schedule():
     url = "https://api-web.nhle.com/v1/schedule/now"
     try:
@@ -135,20 +135,42 @@ def load_schedule():
         
         processed_games = []
         for g in todays_games:
+            # Time Calc
             utc_time = datetime.strptime(g['startTimeUTC'], "%Y-%m-%dT%H:%M:%SZ")
             utc_time = utc_time.replace(tzinfo=pytz.utc)
             est_time = utc_time.astimezone(pytz.timezone('US/Eastern'))
+            
+            # --- LIVE SCORE LOGIC ---
+            game_state = g.get('gameState', 'FUT') # FUT, PRE, LIVE, CRIT, OFF, FINAL
+            
+            # Default: Show Time
+            status_text = est_time.strftime("%I:%M %p EST")
+            is_live = False
+            
+            if game_state in ['LIVE', 'CRIT']:
+                # GAME IS LIVE
+                home_score = g['homeTeam'].get('score', 0)
+                away_score = g['awayTeam'].get('score', 0)
+                status_text = f"LIVE: {away_score} - {home_score}"
+                is_live = True
+                
+            elif game_state in ['OFF', 'FINAL']:
+                # GAME IS OVER
+                home_score = g['homeTeam'].get('score', 0)
+                away_score = g['awayTeam'].get('score', 0)
+                status_text = f"Final: {away_score} - {home_score}"
+
             processed_games.append({
                 "home": g['homeTeam']['abbrev'],
                 "home_logo": g['homeTeam'].get('logo', ''),
                 "away": g['awayTeam']['abbrev'],
                 "away_logo": g['awayTeam'].get('logo', ''),
-                "time": est_time.strftime("%I:%M %p EST")
+                "time": status_text,
+                "is_live": is_live
             })
         return processed_games
     except: return []
 
-# Cache weekly leaders
 @st.cache_data(ttl=3600)
 def load_weekly_leaders():
     end_date = datetime.now()
@@ -160,17 +182,14 @@ def load_weekly_leaders():
     df = df.rename(columns=rename_map)
     return df
 
-# Cache SOS matrix
 @st.cache_data(ttl=3600)
 def get_weekly_schedule_matrix():
     return _get_weekly_schedule_matrix_impl()
 
-# Helper to keep the cache decorator clean
 def _get_weekly_schedule_matrix_impl():
     url_sched = "https://api-web.nhle.com/v1/schedule/now"
     url_stand = "https://api-web.nhle.com/v1/standings/now"
     try:
-        # Schedule
         resp_sched = requests.get(url_sched, timeout=5)
         data_sched = resp_sched.json()
         game_week = data_sched.get('gameWeek', [])
@@ -200,7 +219,6 @@ def _get_weekly_schedule_matrix_impl():
                 matrix.at[home, day_name] = f"vs {away}"
                 matrix.at[away, day_name] = f"@ {home}"
 
-        # Standings
         resp_stand = requests.get(url_stand, timeout=5)
         data_stand = resp_stand.json()
         standings = {}
@@ -212,7 +230,6 @@ def _get_weekly_schedule_matrix_impl():
     except:
         return pd.DataFrame(), {}
 
-# Cache News
 @st.cache_data(ttl=3600)
 def load_nhl_news():
     url = "http://site.api.espn.com/apis/site/v2/sports/hockey/nhl/news"
@@ -228,4 +245,3 @@ def load_nhl_news():
             })
         return articles
     except: return []
-
