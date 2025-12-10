@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 from data_loader import load_nhl_data
 
 # Set page config
@@ -38,7 +39,7 @@ else:
         if selected_positions and 'Pos' in filtered_df.columns:
             filtered_df = filtered_df[filtered_df['Pos'].isin(selected_positions)]
 
-        # Leader Metrics
+        # Metrics
         st.markdown("### Top Performers")
         m1, m2, m3, m4 = st.columns(4)
         
@@ -57,7 +58,7 @@ else:
         m3.metric("Assists", str(a_val), a_name)
         m4.metric("GWG", str(gwg_val), gwg_name)
 
-        # Config
+        # Table Config
         column_config = {
             "Player": st.column_config.TextColumn("Player", pinned=True),
             "Team": st.column_config.TextColumn("Team", help="Team Abbreviation"),
@@ -81,43 +82,60 @@ else:
         st.dataframe(filtered_df, use_container_width=True, hide_index=True, height=600, column_config=column_config)
 
     # ==========================================
-    # TAB 2: MY FANTASY TEAM (URL SAVING)
+    # TAB 2: MY FANTASY TEAM (IMPORT/EXPORT)
     # ==========================================
     with tab2:
         st.header("⚔️ My Roster")
-        st.info("💡 **Pro Tip:** Bookmark this page after selecting your team to save it!")
-
+        
+        # --- 1. LOAD TEAM (UPLOAD) ---
+        col_up, col_help = st.columns([1, 2])
+        with col_up:
+            uploaded_file = st.file_uploader("📂 Load Saved Roster", type=["csv"])
+        
+        # Initialize default list
+        default_roster = []
         all_player_names = sorted(df['Player'].unique())
 
-        # 1. GET ROSTER FROM URL
-        # We read the 'roster' query param from the URL (e.g., ?roster=Player1,Player2)
-        query_params = st.query_params
-        url_roster_str = query_params.get("roster", "")
-        
-        # Convert string back to list, ensuring players exist in our dataset
-        default_roster = []
-        if url_roster_str:
-            default_roster = [p for p in url_roster_str.split(",") if p in all_player_names]
+        # If file is uploaded, read it and override the default list
+        if uploaded_file is not None:
+            try:
+                uploaded_df = pd.read_csv(uploaded_file)
+                if "Player" in uploaded_df.columns:
+                    # Filter to ensure imported names actually exist in current data
+                    valid_players = [p for p in uploaded_df["Player"] if p in all_player_names]
+                    default_roster = valid_players
+                    st.success(f"Loaded {len(valid_players)} players!")
+                else:
+                    st.error("CSV must have a 'Player' column.")
+            except Exception as e:
+                st.error(f"Error reading file: {e}")
 
-        # 2. DEFINE CALLBACK TO UPDATE URL
-        def update_url():
-            # Join the selected list into a string "Player1,Player2"
-            selected_str = ",".join(st.session_state.my_team_selector)
-            st.query_params["roster"] = selected_str
-
-        # 3. MULTISELECT WIDGET
+        # --- 2. SELECT PLAYERS ---
+        # Note: If a file was uploaded, 'default_roster' is now populated
         my_team_list = st.multiselect(
             "Search and Add Players:", 
             all_player_names, 
             default=default_roster,
-            key="my_team_selector",
-            on_change=update_url,
             placeholder="Type a name (e.g. McDavid)..."
         )
 
         if my_team_list:
             my_team_df = df[df['Player'].isin(my_team_list)]
 
+            # --- 3. SAVE TEAM (DOWNLOAD) ---
+            # Convert current roster to CSV for download
+            csv_data = my_team_df[['Player']].to_csv(index=False)
+            
+            st.download_button(
+                label="💾 Save Roster to File",
+                data=csv_data,
+                file_name="my_fantasy_roster.csv",
+                mime="text/csv"
+            )
+
+            st.divider()
+
+            # Team Stats
             st.markdown("### Team Totals")
             t1, t2, t3, t4 = st.columns(4)
             
@@ -134,6 +152,5 @@ else:
                 column_config=column_config
             )
         else:
-            st.write("Your roster is empty. Add players above to get started!")
-
+            st.info("Start by adding players or uploading a saved roster.")
 
