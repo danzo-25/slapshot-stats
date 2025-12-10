@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-from data_loader import load_nhl_data, get_player_game_log, load_schedule, get_weekly_schedule_matrix, load_nhl_news
+import re
+from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news
 
 st.set_page_config(layout="wide", page_title="Slapshot Stats")
 st.title("🏒 Slapshot Stats")
@@ -41,15 +42,9 @@ st.markdown("""
     @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
 
     /* NEWS STYLING */
-    .news-container {
-        background-color: #1e1e1e; /* Rounded square background */
-        border-radius: 12px;
-        padding: 15px;
-        border: 1px solid #333;
-    }
     .news-card {
         display: flex;
-        background-color: #262730; /* Slightly lighter card background */
+        background-color: #262730; 
         border: 1px solid #3a3b42;
         margin-bottom: 12px;
         border-radius: 8px;
@@ -66,8 +61,8 @@ st.markdown("""
     /* TRADE STYLES */
     .trade-win { background-color: rgba(76, 175, 80, 0.15); border: 2px solid #4caf50; padding: 15px; border-radius: 8px; text-align: center; }
     .trade-loss { background-color: rgba(244, 67, 54, 0.15); border: 2px solid #f44336; padding: 15px; border-radius: 8px; text-align: center; }
+    .selected-player-card { background-color: #333; border: 1px solid #555; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
     
-    /* LINK BUTTONS */
     .link-btn { display: block; background-color: #262730; color: #ddd; text-align: center; padding: 8px; margin-bottom: 5px; text-decoration: none; border-radius: 4px; font-size: 0.9em; border: 1px solid #444; }
     .link-btn:hover { background-color: #444; color: white; border-color: #666; }
 </style>
@@ -95,7 +90,6 @@ else:
             val_SO = st.number_input("Shutouts", value=3.0)
             val_OTL = st.number_input("OTL", value=1.0)
 
-    # Global FP
     df['FP'] = ((df['G'] * val_G) + (df['A'] * val_A) + (df['PPP'] * val_PPP) + 
                 (df['SHP'] * val_SHP) + (df['SOG'] * val_SOG) + (df['Hits'] * val_Hit) + 
                 (df['BkS'] * val_BkS) + (df['W'] * val_W) + (df['GA'] * val_GA) + 
@@ -131,9 +125,6 @@ else:
                                 <div class="{status_class}">{game['time']}</div>
                             </div>""", unsafe_allow_html=True)
         st.divider()
-        
-        # --- LAYOUT CHANGE: WIDER NEWS COLUMN ---
-        # Changed from [2, 1] to [3, 2] to give news more space
         col_sos, col_news = st.columns([3, 2])
         
         # --- SOS TABLE ---
@@ -141,58 +132,96 @@ else:
             st.header("💪 Strength of Schedule")
             with st.spinner("Calculating..."):
                 sos_matrix, standings = get_weekly_schedule_matrix()
+            
             if not sos_matrix.empty and standings:
-                def color_sos(val, my_team_abbr):
-                    if not val or val == "": return 'background-color: #262730'
-                    opp_abbr = val.split(" ")[1] 
-                    my_str = standings.get(my_team_abbr, 0.5); opp_str = standings.get(opp_abbr, 0.5)
-                    diff = my_str - opp_str
-                    if diff > 0.15: return 'background-color: #1b5e20; color: white'
-                    elif diff > 0.05: return 'background-color: #2e7d32; color: white'
-                    elif diff > 0.00: return 'background-color: #4caf50; color: black'
-                    elif diff > -0.05: return 'background-color: #fbc02d; color: black'
-                    elif diff > -0.15: return 'background-color: #c62828; color: white'
-                    else: return 'background-color: #b71c1c; color: white'
-                styled_sos = sos_matrix.style.apply(lambda row: [color_sos(val, row.name) for val in row], axis=1).set_properties(**{'text-align': 'center'})
-                st.dataframe(styled_sos, use_container_width=True, height=500)
+                def get_logo(abbr): return f"https://assets.nhle.com/logos/nhl/svg/{abbr}_light.svg"
+                sos_display = sos_matrix.copy()
+                sos_display.index = sos_display.index.map(get_logo)
+                sos_display.reset_index(inplace=True)
+                sos_display.rename(columns={'index': 'Team'}, inplace=True) 
+                
+                day_cols = [c for c in sos_display.columns if c != 'Team']
+                for col in day_cols:
+                    def transform_cell(val):
+                        if not val or val == "": return None
+                        parts = val.split(" ")
+                        if len(parts) > 1: return get_logo(parts[1])
+                        return None
+                    sos_display[col] = sos_display[col].apply(transform_cell)
+
+                def color_sos_logos(val, my_team_url):
+                    if not val: return 'background-color: #262730'
+                    try:
+                        opp_abbr = val.split('/')[-1].split('_')[0]
+                        my_abbr = my_team_url.split('/')[-1].split('_')[0]
+                        my_str = standings.get(my_abbr, 0.5); opp_str = standings.get(opp_abbr, 0.5)
+                        diff = my_str - opp_str
+                        if diff > 0.15: return 'background-color: #1b5e20'
+                        elif diff > 0.05: return 'background-color: #2e7d32'
+                        elif diff > 0.00: return 'background-color: #4caf50'
+                        elif diff > -0.05: return 'background-color: #fbc02d'
+                        elif diff > -0.15: return 'background-color: #c62828'
+                        else: return 'background-color: #b71c1c'
+                    except: return 'background-color: #262730'
+
+                styled_sos = sos_display.style.apply(lambda row: [color_sos_logos(row[c], row['Team']) for c in sos_display.columns], axis=1)
+                column_config = {}
+                column_config["Team"] = st.column_config.ImageColumn("Team", width="small")
+                for col in day_cols: column_config[col] = st.column_config.ImageColumn(col, width="small")
+
+                st.dataframe(styled_sos, use_container_width=True, height=500, column_config=column_config, hide_index=True)
             else: st.info("SOS data unavailable.")
 
-        # --- NEWS FEED (Wrapped in Container) ---
+        # --- NEWS FEED (Using Native Container to fix glitch) ---
         with col_news:
             st.header("📰 Latest Headlines")
             
-            # Start of News Container
-            st.markdown('<div class="news-container">', unsafe_allow_html=True)
-            
-            news = load_nhl_news()
-            if news:
-                for article in news:
-                    img_html = f'<img src="{article["image"]}" class="news-img">' if article['image'] else ''
-                    st.markdown(f"""
-                    <div class="news-card">
-                        {img_html}
-                        <div class="news-content">
-                            <a href="{article['link']}" target="_blank" class="news-title">{article['headline']}</a>
-                            <p class="news-desc">{article['description']}</p>
+            # Use native container instead of raw HTML div to fix layout bug
+            with st.container(border=True):
+                news = load_nhl_news()
+                if news:
+                    for article in news:
+                        img_html = f'<img src="{article["image"]}" class="news-img">' if article['image'] else ''
+                        st.markdown(f"""
+                        <div class="news-card">
+                            {img_html}
+                            <div class="news-content">
+                                <a href="{article['link']}" target="_blank" class="news-title">{article['headline']}</a>
+                                <p class="news-desc">{article['description']}</p>
+                            </div>
                         </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-            else:
-                st.info("No news available.")
-            
-            # End of News Container
-            st.markdown('</div>', unsafe_allow_html=True)
+                        """, unsafe_allow_html=True)
+                else:
+                    st.info("No news available.")
 
-            # --- TRUSTED SOURCES LINKS ---
-            st.markdown("#### More Trusted Sources", help="External links to other major hockey news sites.")
-            st.markdown("""
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">
-                <a href="https://www.tsn.ca/nhl" target="_blank" class="link-btn">TSN Hockey</a>
-                <a href="https://www.sportsnet.ca/nhl/" target="_blank" class="link-btn">Sportsnet</a>
-                <a href="https://www.dailyfaceoff.com/" target="_blank" class="link-btn">Daily Faceoff</a>
-                <a href="https://theathletic.com/nhl/" target="_blank" class="link-btn">The Athletic</a>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown("#### More Trusted Sources")
+            st.markdown("""<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;"><a href="https://www.tsn.ca/nhl" target="_blank" class="link-btn">TSN Hockey</a><a href="https://www.sportsnet.ca/nhl/" target="_blank" class="link-btn">Sportsnet</a><a href="https://www.dailyfaceoff.com/" target="_blank" class="link-btn">Daily Faceoff</a><a href="https://theathletic.com/nhl/" target="_blank" class="link-btn">The Athletic</a></div>""", unsafe_allow_html=True)
+
+        st.divider()
+
+        # --- RESTORED WEEKLY CHARTS ---
+        st.header("🔥 Hot This Week (Last 7 Days)")
+        with st.spinner("Loading weekly trends..."):
+            df_weekly = load_weekly_leaders()
+        
+        if not df_weekly.empty:
+            def make_mini_chart(data, x_col, y_col, color, title):
+                sorted_data = data.sort_values(y_col, ascending=False).head(5)
+                chart = alt.Chart(sorted_data).mark_bar(cornerRadiusEnd=4).encode(
+                    x=alt.X(f'{y_col}:Q', title=None), 
+                    y=alt.Y(f'{x_col}:N', sort='-x', title=None), 
+                    color=alt.value(color), tooltip=[x_col, y_col]
+                ).properties(title=title, height=200)
+                text = chart.mark_text(align='left', dx=2).encode(text=f'{y_col}:Q')
+                return (chart + text)
+
+            c1, c2 = st.columns(2)
+            with c1: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
+            with c2: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
+            
+            c3, c4 = st.columns(2)
+            with c3: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
+            with c4: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
 
     # ================= TAB 2: ANALYTICS =================
     with tab_analytics:
