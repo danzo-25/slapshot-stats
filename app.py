@@ -1,17 +1,3 @@
-Integrating directly with Yahoo or ESPN APIs is surprisingly difficult for a simple web app.
-
-    Yahoo: Requires complex "OAuth2" authentication (developer accounts, API keys, redirect URLs, and managing secret tokens).
-
-    ESPN: Does not have an official public API. It requires "hacking" it by finding secret cookies (swid and espn_s2) in your browser settings to access your private league.
-
-The Best Solution: We will build a "My Roster" page using a manual selector. This is instant, privacy-friendly, and never breaks. We will update app.py to use Tabs: one for the "League Leaders" (what you have now) and one for "My Team".
-Update app.py
-
-This code adds a robust "Fantasy Roster" builder where you can search for players, add them to your custom list, and see their stats isolated from the rest of the league.
-
-Replace your entire app.py with this:
-Python
-
 import streamlit as st
 from data_loader import load_nhl_data
 
@@ -137,3 +123,4 @@ else:
             )
         else:
             st.write("Your roster is empty. Add players above to get started!")
+
