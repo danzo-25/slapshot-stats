@@ -2,39 +2,38 @@ import requests
 import pandas as pd
 import streamlit as st
 
-def load_nhl_data():
-    """
-    Fetches 2025-2026 Regular Season stats for all skaters.
-    Endpoint: https://api.nhle.com/stats/rest/en/skater/summary
-    """
-    url = "https://api.nhle.com/stats/rest/en/skater/summary"
-
+def fetch_data(endpoint, sort_key):
+    """Helper function to fetch data from a specific NHL endpoint"""
+    url = f"https://api.nhle.com/stats/rest/en/{endpoint}/summary"
     params = {
         "isAggregate": "false",
         "isGame": "false",
-        "sort": '[{"property":"points","direction":"DESC"}]',
+        "sort": f'[{{"property":"{sort_key}","direction":"DESC"}}]',
         "start": 0,
         "limit": -1,
         "cayenneExp": "seasonId=20252026 and gameTypeId=2"
     }
-
     try:
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
-        
         data = response.json()
-        players_list = data.get("data", [])
+        return pd.DataFrame(data.get("data", []))
+    except Exception as e:
+        print(f"Error fetching {endpoint}: {e}")
+        return pd.DataFrame()
 
-        if not players_list:
-            return pd.DataFrame()
-
-        df = pd.DataFrame(players_list)
-
-        # 1. Update Rename Map
-        rename_map = {
+def load_nhl_data():
+    """
+    Fetches 2025-2026 stats for BOTH Skaters and Goalies.
+    """
+    # 1. Fetch Skaters
+    df_skaters = fetch_data("skater", "points")
+    if not df_skaters.empty:
+        df_skaters['PosType'] = 'Skater'
+        # Standardize Skater Columns
+        df_skaters = df_skaters.rename(columns={
             'skaterFullName': 'Player',
-            'teamAbbrevs': 'Team',   # Often returns "TEAM1, TEAM2" for traded players
-            'teamAbbrev': 'Team',
+            'teamAbbrevs': 'Team',
             'positionCode': 'Pos',
             'gamesPlayed': 'GP',
             'goals': 'G',
@@ -46,43 +45,73 @@ def load_nhl_data():
             'ppGoals': 'PPG',
             'shPoints': 'SHP',
             'gameWinningGoals': 'GWG',
-            'timeOnIcePerGame': 'TOI',
             'shots': 'SOG',
             'shootingPct': 'Sh%',
-            'faceoffWinPct': 'FO%'
-        }
-        df = df.rename(columns=rename_map)
+            'faceoffWinPct': 'FO%',
+            'timeOnIcePerGame': 'TOI'
+        })
 
-        # Safety Checks
-        if 'Team' not in df.columns:
-            df['Team'] = 'N/A'
-        if 'Pos' not in df.columns:
-            df['Pos'] = 'N/A'
-        if 'Player' not in df.columns:
-            df['Player'] = 'Unknown'
+    # 2. Fetch Goalies
+    df_goalies = fetch_data("goalie", "wins")
+    if not df_goalies.empty:
+        df_goalies['PosType'] = 'Goalie'
+        df_goalies['Pos'] = 'G' # Ensure Position is set
+        # Standardize Goalie Columns
+        df_goalies = df_goalies.rename(columns={
+            'goalieFullName': 'Player',
+            'teamAbbrevs': 'Team',
+            'gamesPlayed': 'GP',
+            'wins': 'W',
+            'losses': 'L',
+            'otLosses': 'OTL',
+            'goalsAgainstAverage': 'GAA',
+            'savePct': 'SV%',
+            'shutouts': 'SO',
+            # Goalies also have Goals/Assists (rare but possible)
+            'goals': 'G',
+            'assists': 'A',
+            'points': 'Pts',
+            'penaltyMinutes': 'PIM',
+            'timeOnIcePerGame': 'TOI'
+        })
 
-        # --- FIX: CLEAN UP DUPLICATE TEAMS ---
-        # If Team is "CGY, TOR", split by comma and take the last one ("TOR")
-        df['Team'] = df['Team'].apply(lambda x: x.split(',')[-1].strip() if isinstance(x, str) else x)
+    # 3. Combine Them
+    # We use concat, which aligns matching columns (GP, Team) and adds new ones (W, SV%) with NaN
+    df_combined = pd.concat([df_skaters, df_goalies], ignore_index=True)
 
-        # Ensure Numeric Columns
-        numeric_cols = ['GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'PPG', 'SHP', 'GWG', 'SOG', 'Sh%', 'FO%']
-        
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            else:
-                df[col] = 0
-
-        # Select Columns
-        cols_to_keep = ['Player', 'Team', 'Pos', 'GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'PPG', 'SHP', 'GWG', 'SOG', 'Sh%', 'FO%', 'TOI']
-        
-        final_cols = [c for c in cols_to_keep if c in df.columns]
-        return df[final_cols]
-
-    except Exception as e:
-        st.error(f"Error connecting to NHL Stats API: {e}")
+    if df_combined.empty:
         return pd.DataFrame()
+
+    # 4. Clean Up
+    
+    # Fix Team Names (Handle "CGY, TOR")
+    df_combined['Team'] = df_combined['Team'].apply(lambda x: x.split(',')[-1].strip() if isinstance(x, str) else 'N/A')
+    
+    # Fill N/A with Unknown
+    df_combined['Player'] = df_combined['Player'].fillna('Unknown')
+    df_combined['Pos'] = df_combined['Pos'].fillna('N/A')
+
+    # 5. Handle Numeric Columns
+    # We list ALL possible stats. If a skater row has NaN for 'Wins', it becomes 0.
+    numeric_cols = [
+        'GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'PPG', 'SHP', 'GWG', 
+        'SOG', 'Sh%', 'FO%', # Skater Stats
+        'W', 'L', 'OTL', 'GAA', 'SV%', 'SO' # Goalie Stats
+    ]
+    
+    for col in numeric_cols:
+        if col not in df_combined.columns:
+            df_combined[col] = 0
+        
+        # Force numeric
+        df_combined[col] = pd.to_numeric(df_combined[col], errors='coerce').fillna(0)
+
+    # 6. Final Column Selection
+    cols_to_keep = ['Player', 'Team', 'Pos', 'PosType'] + numeric_cols + ['TOI']
+    final_cols = [c for c in cols_to_keep if c in df_combined.columns]
+    
+    return df_combined[final_cols]
+
 
 
 
