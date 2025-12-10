@@ -1,48 +1,62 @@
 import streamlit as st
 from data_loader import load_nhl_data
 
-st.set_page_config(page_title="Fantasy Hockey Edge", layout="wide")
-st.title("🏒 Fantasy Hockey Edge Tool (Direct API)")
+st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
 
-# Load Data
-with st.spinner('Fetching live data from NHL.com...'):
+st.title("🏒 NHL 2024-25 Player Stats")
+
+# 1. Load Data
+with st.spinner('Loading NHL Data...'):
     df = load_nhl_data()
 
 if df.empty:
-    st.warning("No data loaded. Please check your internet connection or try again later.")
-    st.stop()
+    st.warning("No data found. The season might not have started or the API is down.")
+else:
+    # --- SIDEBAR FILTERS ---
+    st.sidebar.header("Filter Options")
 
-# --- Sidebar Filters ---
-st.sidebar.header("Filter Players")
+    # Team Filter
+    all_teams = sorted(df['Team'].unique())
+    selected_teams = st.sidebar.multiselect("Select Teams", all_teams, default=all_teams)
 
-# Position Filter
-unique_pos = ['All'] + sorted(df['Pos'].unique().tolist())
-pos_filter = st.sidebar.selectbox("Position", unique_pos)
+    # Position Filter
+    all_positions = sorted(df['Pos'].unique())
+    selected_positions = st.sidebar.multiselect("Select Positions", all_positions, default=all_positions)
 
-# Team Filter
-unique_teams = ['All'] + sorted(df['Team'].unique().tolist())
-team_filter = st.sidebar.selectbox("Team", unique_teams)
+    # --- APPLY FILTERS ---
+    filtered_df = df[
+        (df['Team'].isin(selected_teams)) &
+        (df['Pos'].isin(selected_positions))
+    ]
 
-# --- Apply Filters ---
-filtered_df = df.copy()
+    # --- DISPLAY METRICS ---
+    st.markdown("### Top Performers")
+    col1, col2, col3 = st.columns(3)
+    
+    # Helper to safely get top player
+    def get_top_player(dataframe, column):
+        if dataframe.empty: return "N/A", 0
+        top = dataframe.sort_values(by=column, ascending=False).iloc[0]
+        return top['Player'], top[column]
 
-if pos_filter != 'All':
-    filtered_df = filtered_df[filtered_df['Pos'] == pos_filter]
+    top_pts_name, top_pts_val = get_top_player(filtered_df, 'Pts')
+    top_g_name, top_g_val = get_top_player(filtered_df, 'G')
+    top_a_name, top_a_val = get_top_player(filtered_df, 'A')
 
-if team_filter != 'All':
-    filtered_df = filtered_df[filtered_df['Team'] == team_filter]
+    col1.metric(label="Points Leader", value=str(top_pts_val), delta=top_pts_name)
+    col2.metric(label="Goals Leader", value=str(top_g_val), delta=top_g_name)
+    col3.metric(label="Assists Leader", value=str(top_a_val), delta=top_a_name)
 
-# --- Display Data ---
-st.metric("Players Found", len(filtered_df))
+    # --- MAIN TABLE ---
+    st.markdown("---")
+    st.subheader("Player Stats Table")
+    
+    # Use st.dataframe which allows clicking column headers to sort!
+    st.dataframe(
+        filtered_df, 
+        use_container_width=True, 
+        hide_index=True,
+        height=600
+    )
 
-st.dataframe(
-    filtered_df,
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "Player": st.column_config.TextColumn("Player", width="medium"),
-        "Pts": st.column_config.NumberColumn("Pts", format="%d"),
-        "Sh%": st.column_config.NumberColumn("Sh%", format="%.1f%%"),
-        "FO%": st.column_config.NumberColumn("FO%", format="%.1f%%"),
-    }
-)
+    st.markdown(f"*Showing {len(filtered_df)} players*")
