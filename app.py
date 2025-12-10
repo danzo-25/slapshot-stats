@@ -3,69 +3,50 @@ from data_loader import load_nhl_data
 
 st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
 
-st.title("🏒 NHL 2024-25 Player Stats")
+st.title("🏒 NHL 2025-26 Player Stats")
 
-# 1. Load Data
 with st.spinner('Loading NHL Data...'):
     df = load_nhl_data()
 
-# 2. Check if Data Loaded
 if df.empty:
     st.warning("No data found. The API might be busy or the season hasn't started.")
 else:
-    # --- SIDEBAR FILTERS ---
+    # Sidebar Filters
     st.sidebar.header("Filter Options")
 
-    # Team Filter (Safety Check: ensure column exists and drop N/As)
+    # Team Filter
     if 'Team' in df.columns:
-        all_teams = sorted(df['Team'].dropna().unique())
-        selected_teams = st.sidebar.multiselect("Select Teams", all_teams, default=all_teams)
-    else:
-        selected_teams = []
+        unique_teams = sorted(df['Team'].dropna().unique())
+        selected_teams = st.sidebar.multiselect("Select Teams", unique_teams, default=unique_teams)
+        if selected_teams:
+            df = df[df['Team'].isin(selected_teams)]
 
     # Position Filter
     if 'Pos' in df.columns:
-        all_positions = sorted(df['Pos'].dropna().unique())
-        selected_positions = st.sidebar.multiselect("Select Positions", all_positions, default=all_positions)
-    else:
-        selected_positions = []
+        unique_pos = sorted(df['Pos'].dropna().unique())
+        selected_positions = st.sidebar.multiselect("Select Positions", unique_pos, default=unique_pos)
+        if selected_positions:
+            df = df[df['Pos'].isin(selected_positions)]
 
-    # --- APPLY FILTERS ---
-    # Only filter if the user made a selection, otherwise show all
-    if selected_teams and 'Team' in df.columns:
-        df = df[df['Team'].isin(selected_teams)]
-    
-    if selected_positions and 'Pos' in df.columns:
-        df = df[df['Pos'].isin(selected_positions)]
-
-    # --- DISPLAY METRICS ---
+    # Metrics
     st.markdown("### Top Performers")
     col1, col2, col3 = st.columns(3)
     
-    def get_top_player(dataframe, column):
-        if dataframe.empty or column not in dataframe.columns:
-            return "N/A", 0
-        top = dataframe.sort_values(by=column, ascending=False).iloc[0]
-        return top['Player'], top[column]
+    def get_top(df, col):
+        if df.empty or col not in df.columns: return "N/A", 0
+        row = df.sort_values(by=col, ascending=False).iloc[0]
+        return row['Player'], row[col]
 
-    top_pts_name, top_pts_val = get_top_player(df, 'Pts')
-    top_g_name, top_g_val = get_top_player(df, 'G')
-    top_a_name, top_a_val = get_top_player(df, 'A')
+    p_name, p_val = get_top(df, 'Pts')
+    g_name, g_val = get_top(df, 'G')
+    a_name, a_val = get_top(df, 'A')
 
-    col1.metric(label="Points Leader", value=str(top_pts_val), delta=top_pts_name)
-    col2.metric(label="Goals Leader", value=str(top_g_val), delta=top_g_name)
-    col3.metric(label="Assists Leader", value=str(top_a_val), delta=top_a_name)
+    col1.metric("Points Leader", str(p_val), p_name)
+    col2.metric("Goals Leader", str(g_val), g_name)
+    col3.metric("Assists Leader", str(a_val), a_name)
 
-    # --- MAIN TABLE ---
+    # Table
     st.markdown("---")
-    st.subheader("Player Stats Table")
-    
-    st.dataframe(
-        df, 
-        use_container_width=True, 
-        hide_index=True,
-        height=600
-    )
+    st.dataframe(df, use_container_width=True, hide_index=True, height=600)
 
-    st.markdown(f"*Showing {len(df)} players*")
 
