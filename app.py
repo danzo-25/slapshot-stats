@@ -3,7 +3,7 @@ import pandas as pd
 from data_loader import load_nhl_data, get_player_game_log
 
 st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
-st.title("🏒 NHL 2025-26 Fantasy Tool")
+st.title("🏒 Slapshot Stats")
 
 # --- LOAD DATA ---
 with st.spinner('Loading NHL Data...'):
@@ -117,6 +117,7 @@ else:
             c4.metric("Goalie SO", int(team_df['SO'].sum()))
             
             st.dataframe(team_df, use_container_width=True, hide_index=True, column_config=column_config)
+
 
 
 
