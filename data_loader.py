@@ -4,28 +4,22 @@ import streamlit as st
 from datetime import datetime, timedelta
 import pytz
 
-def fetch_data(endpoint, sort_key, override_cayenne=None, aggregate=False):
-    """
-    Helper to fetch summary data.
-    - override_cayenne: If set, replaces the default seasonId filter completely.
-    - aggregate: If True, tells API to sum up the stats (isAggregate=true).
-    """
+def fetch_data(endpoint, sort_key, extra_filter=""):
+    """Helper to fetch summary data"""
     url = f"https://api.nhle.com/stats/rest/en/{endpoint}/summary"
     
-    # LOGIC FIX: If we have a custom filter (like weekly dates), use that.
-    # Otherwise, default to the full 2025-2026 Season.
-    if override_cayenne:
-        cayenne_exp = override_cayenne
-    else:
-        cayenne_exp = "seasonId=20252026 and gameTypeId=2"
+    # Base filter for 2025-2026 Regular Season
+    base_exp = "seasonId=20252026 and gameTypeId=2"
+    if extra_filter:
+        base_exp += f" and {extra_filter}"
 
     params = {
-        "isAggregate": "true" if aggregate else "false",
+        "isAggregate": "false",
         "isGame": "false",
         "sort": f'[{{"property":"{sort_key}","direction":"DESC"}}]',
         "start": 0,
-        "limit": 50,
-        "cayenneExp": cayenne_exp
+        "limit": 50, # Limit to top 50 for weekly leaders to save speed
+        "cayenneExp": base_exp
     }
     try:
         response = requests.get(url, params=params, timeout=10)
@@ -98,6 +92,8 @@ def get_player_game_log(player_id):
         return df_log.sort_values(by='gameDate')
     except: return pd.DataFrame()
 
+# --- NEW: SCHEDULE & WEEKLY LEADERS ---
+
 def load_schedule():
     """Fetches the current week's schedule and filters for Today."""
     url = "https://api-web.nhle.com/v1/schedule/now"
@@ -105,8 +101,11 @@ def load_schedule():
         response = requests.get(url, timeout=5)
         response.raise_for_status()
         data = response.json()
+        
+        # Get today's date in YYYY-MM-DD
         today_str = datetime.now().strftime("%Y-%m-%d")
         
+        # Find games for today
         todays_games = []
         for day in data.get('gameWeek', []):
             if day['date'] == today_str:
@@ -115,6 +114,7 @@ def load_schedule():
         
         processed_games = []
         for g in todays_games:
+            # Convert UTC to EST
             utc_time = datetime.strptime(g['startTimeUTC'], "%Y-%m-%dT%H:%M:%SZ")
             utc_time = utc_time.replace(tzinfo=pytz.utc)
             est_time = utc_time.astimezone(pytz.timezone('US/Eastern'))
@@ -126,30 +126,29 @@ def load_schedule():
                 "away_logo": g['awayTeam'].get('logo', ''),
                 "time": est_time.strftime("%I:%M %p EST")
             })
+            
         return processed_games
-    except: return []
+    except Exception as e:
+        print(f"Schedule Error: {e}")
+        return []
 
 def load_weekly_leaders():
-    """Fetches top performers for the last 7 days using API Aggregation."""
+    """Fetches top performers for the last 7 days."""
+    # Calculate date 7 days ago
     end_date = datetime.now()
     start_date = end_date - timedelta(days=7)
     
-    # CRITICAL FIX: Only filter by Date and GameType. Do NOT include seasonId.
-    clean_date_filter = f"gameTypeId=2 and gameDate >= '{start_date.strftime('%Y-%m-%d')}' and gameDate <= '{end_date.strftime('%Y-%m-%d')}'"
+    date_filter = f"gameDate >= '{start_date.strftime('%Y-%m-%d')}' and gameDate <= '{end_date.strftime('%Y-%m-%d')}'"
     
-    # Call fetch_data with override_cayenne to use ONLY our date filter
-    df = fetch_data("skater", "points", override_cayenne=clean_date_filter, aggregate=True)
+    # We reuse fetch_data but with the date filter
+    df = fetch_data("skater", "points", extra_filter=date_filter)
     
     if df.empty: return pd.DataFrame()
 
+    # Rename just enough for the charts
     rename_map = {
         'skaterFullName': 'Player', 'teamAbbrevs': 'Team', 'positionCode': 'Pos',
         'goals': 'G', 'assists': 'A', 'points': 'Pts', 'shots': 'SOG', 'ppPoints': 'PPP'
     }
     df = df.rename(columns=rename_map)
     return df
-
-
-
-
-
