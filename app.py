@@ -116,7 +116,8 @@ else:
             c3.metric("Goalie Wins", int(team_df['W'].sum()))
             c4.metric("Goalie SO", int(team_df['SO'].sum()))
             
-            st.dataframe(team_df, use_container_width=True, hide_index=True, column_co
+            st.dataframe(team_df, use_container_width=True, hide_index=True, column_config=column_config)
+
 
 
 
