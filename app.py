@@ -1,12 +1,68 @@
 import streamlit as st
 import pandas as pd
+import altair as alt
 from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders
 
 st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
 st.title("🏒 NHL 2025-26 Dashboard")
 
+# --- CUSTOM CSS FOR STYLING ---
+st.markdown("""
+<style>
+    /* SCHEDULE CARD STYLING */
+    .game-card {
+        background-color: #262730;
+        border: 1px solid #41444e;
+        border-radius: 10px;
+        padding: 10px; 
+        text-align: center;
+        margin: 0 auto 15px auto; /* Center horizontally, add bottom margin */
+        max-width: 220px; /* Force the box to be much smaller (Quarter size) */
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+    }
+    .team-row {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+    }
+    .team-info {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    /* ENLARGE ICONS */
+    .team-logo {
+        width: 70px; 
+        height: 70px;
+        object-fit: contain;
+        margin-bottom: 5px;
+    }
+    /* BOLD TEXT */
+    .team-name {
+        font-weight: 900;
+        font-size: 1.1em;
+        margin-top: -5px;
+    }
+    .vs-text {
+        font-size: 1.2em;
+        font-weight: bold;
+        color: #888;
+        padding-top: 10px;
+    }
+    /* CENTERED TIME */
+    .game-time {
+        margin-top: 10px;
+        font-weight: bold;
+        color: #FF4B4B;
+        font-size: 1em;
+        border-top: 1px solid #41444e;
+        padding-top: 5px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # --- LOAD MAIN DATA ---
-# We load the big dataset once to use across tabs
 with st.spinner('Loading NHL Data...'):
     df = load_nhl_data()
 
@@ -35,17 +91,23 @@ else:
                     if i + j < len(schedule):
                         game = schedule[i+j]
                         with cols[j]:
-                            with st.container(border=True):
-                                c1, c2, c3 = st.columns([1, 0.5, 1])
-                                with c1:
-                                    st.image(game['away_logo'], width=50)
-                                    st.caption(game['away'])
-                                with c2:
-                                    st.markdown(f"**VS**")
-                                with c3:
-                                    st.image(game['home_logo'], width=50)
-                                    st.caption(game['home'])
-                                st.markdown(f"<div style='text-align: center; font-weight: bold;'>{game['time']}</div>", unsafe_allow_html=True)
+                            # REPLACED st.container with Custom HTML for styling control
+                            st.markdown(f"""
+                            <div class="game-card">
+                                <div class="team-row">
+                                    <div class="team-info">
+                                        <img src="{game['away_logo']}" class="team-logo">
+                                        <div class="team-name">{game['away']}</div>
+                                    </div>
+                                    <div class="vs-text">@</div>
+                                    <div class="team-info">
+                                        <img src="{game['home_logo']}" class="team-logo">
+                                        <div class="team-name">{game['home']}</div>
+                                    </div>
+                                </div>
+                                <div class="game-time">{game['time']}</div>
+                            </div>
+                            """, unsafe_allow_html=True)
 
         st.divider()
 
@@ -56,37 +118,45 @@ else:
             df_weekly = load_weekly_leaders()
         
         if not df_weekly.empty:
-            # Top 4 Charts
-            c1, c2 = st.columns(2)
-            
-            with c1:
-                st.subheader("Top Goal Scorers")
-                top_g = df_weekly.sort_values('G', ascending=False).head(5)
-                st.bar_chart(top_g.set_index('Player')['G'], color="#ff4b4b")
+            # Helper to make Horizontal, Small Charts
+            def make_mini_chart(data, x_col, y_col, color, title):
+                # Sort data descending
+                sorted_data = data.sort_values(y_col, ascending=False).head(5)
+                
+                # Horizontal Bar Chart
+                chart = alt.Chart(sorted_data).mark_bar(cornerRadiusEnd=4).encode(
+                    x=alt.X(f'{y_col}:Q', title=None), # The stat is on X axis (Horizontal)
+                    y=alt.Y(f'{x_col}:N', sort='-x', title=None), # Player name on Y axis
+                    color=alt.value(color),
+                    tooltip=[x_col, y_col]
+                )
+                
+                # Add Text Labels to end of bars
+                text = chart.mark_text(align='left', dx=2).encode(
+                    text=f'{y_col}:Q'
+                )
+                
+                # Set specific height (Halved size ~ 200px)
+                return (chart + text).properties(title=title, height=200)
 
+            c1, c2 = st.columns(2)
+            with c1:
+                st.altair_chart(make_mini_chart(df_weekly, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
             with c2:
-                st.subheader("Top Points Leaders")
-                top_pts = df_weekly.sort_values('Pts', ascending=False).head(5)
-                st.bar_chart(top_pts.set_index('Player')['Pts'], color="#0083b8")
+                st.altair_chart(make_mini_chart(df_weekly, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
             
             c3, c4 = st.columns(2)
-            
             with c3:
-                st.subheader("Most Shots on Goal")
-                top_sog = df_weekly.sort_values('SOG', ascending=False).head(5)
-                st.bar_chart(top_sog.set_index('Player')['SOG'], color="#ffa600")
-
+                st.altair_chart(make_mini_chart(df_weekly, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
             with c4:
-                st.subheader("Power Play Points")
-                top_ppp = df_weekly.sort_values('PPP', ascending=False).head(5)
-                st.bar_chart(top_ppp.set_index('Player')['PPP'], color="#58508d")
+                st.altair_chart(make_mini_chart(df_weekly, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
 
         else:
             st.info("No weekly data available yet.")
 
 
     # ==========================================
-    # TAB 2: DATA & ANALYTICS (Old Summary Tab)
+    # TAB 2: DATA & ANALYTICS
     # ==========================================
     with tab_analytics:
         st.header("📈 Breakout Detector")
@@ -176,5 +246,4 @@ else:
             c3.metric("Goalie Wins", int(team_df['W'].sum()))
             c4.metric("Goalie SO", int(team_df['SO'].sum()))
             
-            # Reuse column config from above
             st.dataframe(team_df, use_container_width=True, hide_index=True, column_config=column_config)
