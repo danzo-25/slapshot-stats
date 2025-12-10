@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news
+from data_loader import load_nhl_data, get_player_game_log, load_schedule, get_weekly_schedule_matrix, load_nhl_news
 
 st.set_page_config(layout="wide", page_title="Slapshot Stats")
 st.title("🏒 Slapshot Stats")
@@ -40,46 +40,35 @@ st.markdown("""
     .game-live { margin-top: 5px; font-weight: bold; color: #ff4b4b; font-size: 1.0em; border-top: 1px solid #41444e; padding-top: 2px; animation: pulse 2s infinite; }
     @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
 
-    /* NEWS CARD STYLING (With Image) */
+    /* NEWS STYLING */
+    .news-container {
+        background-color: #1e1e1e; /* Rounded square background */
+        border-radius: 12px;
+        padding: 15px;
+        border: 1px solid #333;
+    }
     .news-card {
         display: flex;
-        background-color: #1e1e1e;
-        border: 1px solid #333;
-        margin-bottom: 10px;
-        border-radius: 5px;
+        background-color: #262730; /* Slightly lighter card background */
+        border: 1px solid #3a3b42;
+        margin-bottom: 12px;
+        border-radius: 8px;
         overflow: hidden;
         transition: transform 0.2s;
     }
     .news-card:hover { transform: translateY(-2px); border-color: #555; }
-    .news-img {
-        width: 100px;
-        height: auto;
-        object-fit: cover;
-        flex-shrink: 0; /* Don't shrink image */
-    }
+    .news-img { width: 110px; height: auto; object-fit: cover; flex-shrink: 0; border-right: 1px solid #3a3b42; }
     .news-content { padding: 10px; display: flex; flex-direction: column; justify-content: center; }
-    .news-title { font-weight: bold; font-size: 0.95em; color: #fff; text-decoration: none; margin-bottom: 4px; line-height: 1.2; }
+    .news-title { font-weight: bold; font-size: 0.95em; color: #fff; text-decoration: none; margin-bottom: 4px; line-height: 1.3; }
     .news-title:hover { color: #4da6ff; }
     .news-desc { font-size: 0.85em; color: #aaa; margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
     /* TRADE STYLES */
     .trade-win { background-color: rgba(76, 175, 80, 0.15); border: 2px solid #4caf50; padding: 15px; border-radius: 8px; text-align: center; }
     .trade-loss { background-color: rgba(244, 67, 54, 0.15); border: 2px solid #f44336; padding: 15px; border-radius: 8px; text-align: center; }
-    .selected-player-card { background-color: #333; border: 1px solid #555; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
     
     /* LINK BUTTONS */
-    .link-btn {
-        display: block;
-        background-color: #262730;
-        color: #ddd;
-        text-align: center;
-        padding: 8px;
-        margin-bottom: 5px;
-        text-decoration: none;
-        border-radius: 4px;
-        font-size: 0.9em;
-        border: 1px solid #444;
-    }
+    .link-btn { display: block; background-color: #262730; color: #ddd; text-align: center; padding: 8px; margin-bottom: 5px; text-decoration: none; border-radius: 4px; font-size: 0.9em; border: 1px solid #444; }
     .link-btn:hover { background-color: #444; color: white; border-color: #666; }
 </style>
 """, unsafe_allow_html=True)
@@ -142,7 +131,10 @@ else:
                                 <div class="{status_class}">{game['time']}</div>
                             </div>""", unsafe_allow_html=True)
         st.divider()
-        col_sos, col_news = st.columns([2, 1])
+        
+        # --- LAYOUT CHANGE: WIDER NEWS COLUMN ---
+        # Changed from [2, 1] to [3, 2] to give news more space
+        col_sos, col_news = st.columns([3, 2])
         
         # --- SOS TABLE ---
         with col_sos:
@@ -162,19 +154,20 @@ else:
                     elif diff > -0.15: return 'background-color: #c62828; color: white'
                     else: return 'background-color: #b71c1c; color: white'
                 styled_sos = sos_matrix.style.apply(lambda row: [color_sos(val, row.name) for val in row], axis=1).set_properties(**{'text-align': 'center'})
-                st.dataframe(styled_sos, use_container_width=False, height=500, width=800)
+                st.dataframe(styled_sos, use_container_width=True, height=500)
             else: st.info("SOS data unavailable.")
 
-        # --- NEWS FEED (With Thumbnails) ---
+        # --- NEWS FEED (Wrapped in Container) ---
         with col_news:
             st.header("📰 Latest Headlines")
-            news = load_nhl_news()
             
+            # Start of News Container
+            st.markdown('<div class="news-container">', unsafe_allow_html=True)
+            
+            news = load_nhl_news()
             if news:
                 for article in news:
-                    # Logic to show image only if it exists
                     img_html = f'<img src="{article["image"]}" class="news-img">' if article['image'] else ''
-                    
                     st.markdown(f"""
                     <div class="news-card">
                         {img_html}
@@ -186,11 +179,14 @@ else:
                     """, unsafe_allow_html=True)
             else:
                 st.info("No news available.")
+            
+            # End of News Container
+            st.markdown('</div>', unsafe_allow_html=True)
 
             # --- TRUSTED SOURCES LINKS ---
-            st.markdown("#### More Trusted Sources")
+            st.markdown("#### More Trusted Sources", help="External links to other major hockey news sites.")
             st.markdown("""
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;">
                 <a href="https://www.tsn.ca/nhl" target="_blank" class="link-btn">TSN Hockey</a>
                 <a href="https://www.sportsnet.ca/nhl/" target="_blank" class="link-btn">Sportsnet</a>
                 <a href="https://www.dailyfaceoff.com/" target="_blank" class="link-btn">Daily Faceoff</a>
