@@ -28,7 +28,9 @@ def fetch_data(endpoint, report_type, sort_key, override_cayenne=None, aggregate
     except Exception as e:
         return pd.DataFrame()
 
-# --- MAIN DATA LOADER ---
+# --- MAIN DATA LOADER (CACHED) ---
+# ttl=3600 means "Refresh data every 1 hour"
+@st.cache_data(ttl=3600)
 def load_nhl_data():
     # 1. Skaters
     df_sum = fetch_data("skater", "summary", "points")
@@ -100,6 +102,8 @@ def load_nhl_data():
     
     return df_combined[final_cols]
 
+# Cache specific player logs
+@st.cache_data(ttl=3600)
 def get_player_game_log(player_id):
     url = f"https://api-web.nhle.com/v1/player/{player_id}/game-log/20252026/2"
     try:
@@ -113,8 +117,9 @@ def get_player_game_log(player_id):
         return df_log.sort_values(by='gameDate')
     except: return pd.DataFrame()
 
+# Cache schedule (refresh every 1 hour)
+@st.cache_data(ttl=3600)
 def load_schedule():
-    """For the visual card display (today's games only)"""
     url = "https://api-web.nhle.com/v1/schedule/now"
     try:
         response = requests.get(url, timeout=5)
@@ -143,6 +148,8 @@ def load_schedule():
         return processed_games
     except: return []
 
+# Cache weekly leaders
+@st.cache_data(ttl=3600)
 def load_weekly_leaders():
     end_date = datetime.now()
     start_date = end_date - timedelta(days=7)
@@ -153,32 +160,25 @@ def load_weekly_leaders():
     df = df.rename(columns=rename_map)
     return df
 
-# --- STRENGTH OF SCHEDULE HELPERS ---
-def load_standings():
-    url = "https://api-web.nhle.com/v1/standings/now"
-    try:
-        response = requests.get(url, timeout=5)
-        data = response.json()
-        standings = {}
-        for team in data.get('standings', []):
-            team_abbr = team['teamAbbrev']['default']
-            standings[team_abbr] = team.get('pointPctg', 0.5)
-        return standings
-    except:
-        return {}
-
+# Cache SOS matrix
+@st.cache_data(ttl=3600)
 def get_weekly_schedule_matrix():
-    url = "https://api-web.nhle.com/v1/schedule/now"
+    return _get_weekly_schedule_matrix_impl()
+
+# Helper to keep the cache decorator clean
+def _get_weekly_schedule_matrix_impl():
+    url_sched = "https://api-web.nhle.com/v1/schedule/now"
+    url_stand = "https://api-web.nhle.com/v1/standings/now"
     try:
-        response = requests.get(url, timeout=5)
-        data = response.json()
-        game_week = data.get('gameWeek', [])
+        # Schedule
+        resp_sched = requests.get(url_sched, timeout=5)
+        data_sched = resp_sched.json()
+        game_week = data_sched.get('gameWeek', [])
         
         if not game_week: return pd.DataFrame(), {}
         
         days_map = {} 
         ordered_days = []
-        
         for day_obj in game_week:
             date_str = day_obj['date']
             dt = datetime.strptime(date_str, "%Y-%m-%d")
@@ -189,43 +189,43 @@ def get_weekly_schedule_matrix():
         all_teams = sorted(list(set([g['homeTeam']['abbrev'] for d in game_week for g in d['games']] + 
                                     [g['awayTeam']['abbrev'] for d in game_week for g in d['games']])))
         
-        matrix = pd.DataFrame(index=all_teams, columns=ordered_days)
-        matrix = matrix.fillna("") 
+        matrix = pd.DataFrame(index=all_teams, columns=ordered_days).fillna("")
         
         for day_obj in game_week:
             date_str = day_obj['date']
             day_name = days_map[date_str]
-            
             for game in day_obj['games']:
                 home = game['homeTeam']['abbrev']
                 away = game['awayTeam']['abbrev']
                 matrix.at[home, day_name] = f"vs {away}"
                 matrix.at[away, day_name] = f"@ {home}"
 
-        standings = load_standings()
+        # Standings
+        resp_stand = requests.get(url_stand, timeout=5)
+        data_stand = resp_stand.json()
+        standings = {}
+        for team in data_stand.get('standings', []):
+            team_abbr = team['teamAbbrev']['default']
+            standings[team_abbr] = team.get('pointPctg', 0.5)
+            
         return matrix, standings
-
-    except Exception as e:
-        print(f"SOS Error: {e}")
+    except:
         return pd.DataFrame(), {}
 
-# --- NEW: NEWS FETCHER (ESPN API) ---
+# Cache News
+@st.cache_data(ttl=3600)
 def load_nhl_news():
-    """Fetches top 5 NHL news stories from ESPN (Public API)."""
     url = "http://site.api.espn.com/apis/site/v2/sports/hockey/nhl/news"
     try:
         response = requests.get(url, timeout=5)
-        response.raise_for_status()
         data = response.json()
-        
         articles = []
-        for article in data.get('articles', [])[:6]: # Top 6
+        for article in data.get('articles', [])[:6]: 
             articles.append({
                 "headline": article.get('headline', 'No Headline'),
                 "description": article.get('description', ''),
                 "link": article['links']['web']['href'] if 'links' in article else '#'
             })
         return articles
-    except Exception as e:
-        print(f"News Error: {e}")
-        return []
+    except: return []
+
