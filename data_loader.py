@@ -153,10 +153,8 @@ def load_weekly_leaders():
     df = df.rename(columns=rename_map)
     return df
 
-# --- NEW: STRENGTH OF SCHEDULE HELPERS ---
-
+# --- STRENGTH OF SCHEDULE HELPERS ---
 def load_standings():
-    """Fetches current standings to determine team strength (Points Percentage)."""
     url = "https://api-web.nhle.com/v1/standings/now"
     try:
         response = requests.get(url, timeout=5)
@@ -164,19 +162,12 @@ def load_standings():
         standings = {}
         for team in data.get('standings', []):
             team_abbr = team['teamAbbrev']['default']
-            # We use Points Percentage (pointPctg) as the best measure of strength
             standings[team_abbr] = team.get('pointPctg', 0.5)
         return standings
     except:
         return {}
 
 def get_weekly_schedule_matrix():
-    """
-    Builds a DataFrame for the Strength of Schedule Matrix.
-    Index: Team Name
-    Columns: Mon, Tue, Wed...
-    Value: Opponent Name (e.g. '@TOR')
-    """
     url = "https://api-web.nhle.com/v1/schedule/now"
     try:
         response = requests.get(url, timeout=5)
@@ -185,27 +176,22 @@ def get_weekly_schedule_matrix():
         
         if not game_week: return pd.DataFrame(), {}
         
-        # 1. Map Dates to Day Names
-        # We need to guarantee Mon-Sun columns
-        days_map = {} # { '2025-12-10': 'Wednesday' }
+        days_map = {} 
         ordered_days = []
         
         for day_obj in game_week:
             date_str = day_obj['date']
             dt = datetime.strptime(date_str, "%Y-%m-%d")
-            day_name = dt.strftime("%A") # "Monday"
+            day_name = dt.strftime("%A") 
             days_map[date_str] = day_name
             ordered_days.append(day_name)
             
-        # 2. Initialize Matrix
-        # Get all unique teams from standings or schedule
         all_teams = sorted(list(set([g['homeTeam']['abbrev'] for d in game_week for g in d['games']] + 
                                     [g['awayTeam']['abbrev'] for d in game_week for g in d['games']])))
         
         matrix = pd.DataFrame(index=all_teams, columns=ordered_days)
-        matrix = matrix.fillna("") # Empty string means no game
+        matrix = matrix.fillna("") 
         
-        # 3. Populate Matrix
         for day_obj in game_week:
             date_str = day_obj['date']
             day_name = days_map[date_str]
@@ -213,17 +199,33 @@ def get_weekly_schedule_matrix():
             for game in day_obj['games']:
                 home = game['homeTeam']['abbrev']
                 away = game['awayTeam']['abbrev']
-                
-                # For Home Team, opponent is 'vs AWAY'
                 matrix.at[home, day_name] = f"vs {away}"
-                # For Away Team, opponent is '@ HOME'
                 matrix.at[away, day_name] = f"@ {home}"
 
-        # 4. Get Standings for Calculation
         standings = load_standings()
-        
         return matrix, standings
 
     except Exception as e:
         print(f"SOS Error: {e}")
         return pd.DataFrame(), {}
+
+# --- NEW: NEWS FETCHER (ESPN API) ---
+def load_nhl_news():
+    """Fetches top 5 NHL news stories from ESPN (Public API)."""
+    url = "http://site.api.espn.com/apis/site/v2/sports/hockey/nhl/news"
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        
+        articles = []
+        for article in data.get('articles', [])[:6]: # Top 6
+            articles.append({
+                "headline": article.get('headline', 'No Headline'),
+                "description": article.get('description', ''),
+                "link": article['links']['web']['href'] if 'links' in article else '#'
+            })
+        return articles
+    except Exception as e:
+        print(f"News Error: {e}")
+        return []
