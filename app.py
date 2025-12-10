@@ -6,85 +6,43 @@ from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_
 st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
 st.title("🏒 NHL 2025-26 Dashboard")
 
-# --- CUSTOM CSS FOR STYLING ---
+# --- CUSTOM CSS ---
 st.markdown("""
 <style>
-    /* SCHEDULE CARD STYLING */
     .game-card {
         background-color: #262730;
         border: 1px solid #41444e;
-        border-radius: 8px; /* Slightly tighter radius */
-        padding: 5px; /* Reduced padding */
+        border-radius: 8px;
+        padding: 5px;
         text-align: center;
-        margin: 0 auto 5px auto; /* Reduced bottom margin to 5px */
-        max-width: 100%; /* Let it fill the column width */
+        margin: 0 auto 5px auto;
+        max-width: 100%;
         box-shadow: 1px 1px 3px rgba(0,0,0,0.2);
     }
-    .team-row {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 5px; /* Tighter gap between teams */
-    }
-    .team-info {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-    }
-    /* ICONS */
-    .team-logo {
-        width: 55px; /* Good size for 5-column layout */
-        height: 55px;
-        object-fit: contain;
-        margin-bottom: 2px;
-    }
-    /* TEXT */
-    .team-name {
-        font-weight: 900;
-        font-size: 1em;
-        margin-top: -2px;
-    }
-    .vs-text {
-        font-size: 1em;
-        font-weight: bold;
-        color: #888;
-        padding-top: 5px;
-    }
-    /* TIME */
-    .game-time {
-        margin-top: 5px;
-        font-weight: bold;
-        color: #FF4B4B;
-        font-size: 0.9em;
-        border-top: 1px solid #41444e;
-        padding-top: 2px;
-    }
+    .team-row { display: flex; justify-content: center; align-items: center; gap: 5px; }
+    .team-info { display: flex; flex-direction: column; align-items: center; }
+    .team-logo { width: 55px; height: 55px; object-fit: contain; margin-bottom: 2px; }
+    .team-name { font-weight: 900; font-size: 1em; margin-top: -2px; }
+    .vs-text { font-size: 1em; font-weight: bold; color: #888; padding-top: 5px; }
+    .game-time { margin-top: 5px; font-weight: bold; color: #FF4B4B; font-size: 0.9em; border-top: 1px solid #41444e; padding-top: 2px; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- LOAD MAIN DATA ---
-with st.spinner('Loading NHL Data...'):
+with st.spinner('Loading NHL Data (Summary + Advanced)...'):
     df = load_nhl_data()
 
 if df.empty:
     st.warning("No data found. API might be down.")
 else:
-    # --- TABS ---
     tab_home, tab_analytics, tab_fantasy = st.tabs(["🏠 Home", "📊 Data & Analytics", "⚔️ My Fantasy Team"])
 
-    # ==========================================
-    # TAB 1: HOME
-    # ==========================================
+    # ================= TAB 1: HOME =================
     with tab_home:
-        # --- SECTION A: TODAY'S SCHEDULE ---
         st.header("📅 Today's Games")
-        
         schedule = load_schedule()
-        
         if not schedule:
             st.info("No games scheduled for today.")
         else:
-            # CHANGE: 5 Games per row instead of 3 to align them horizontally
             cols_per_row = 5
             for i in range(0, len(schedule), cols_per_row):
                 cols = st.columns(cols_per_row)
@@ -110,88 +68,74 @@ else:
                             """, unsafe_allow_html=True)
 
         st.divider()
-
-        # --- SECTION B: HOT THIS WEEK ---
         st.header("🔥 Hot This Week (Last 7 Days)")
         
         with st.spinner("Loading weekly trends..."):
             df_weekly = load_weekly_leaders()
         
         if not df_weekly.empty:
-            # Horizontal Charts (Halved Size ~200px)
             def make_mini_chart(data, x_col, y_col, color, title):
                 sorted_data = data.sort_values(y_col, ascending=False).head(5)
-                
                 chart = alt.Chart(sorted_data).mark_bar(cornerRadiusEnd=4).encode(
                     x=alt.X(f'{y_col}:Q', title=None), 
                     y=alt.Y(f'{x_col}:N', sort='-x', title=None), 
                     color=alt.value(color),
                     tooltip=[x_col, y_col]
                 )
-                
                 text = chart.mark_text(align='left', dx=2).encode(text=f'{y_col}:Q')
-                
                 return (chart + text).properties(title=title, height=200)
 
             c1, c2 = st.columns(2)
-            with c1:
-                st.altair_chart(make_mini_chart(df_weekly, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
-            with c2:
-                st.altair_chart(make_mini_chart(df_weekly, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
-            
+            with c1: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
+            with c2: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
             c3, c4 = st.columns(2)
-            with c3:
-                st.altair_chart(make_mini_chart(df_weekly, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
-            with c4:
-                st.altair_chart(make_mini_chart(df_weekly, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
-
+            with c3: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
+            with c4: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
         else:
             st.info("No weekly data available yet.")
 
-
-    # ==========================================
-    # TAB 2: DATA & ANALYTICS
-    # ==========================================
+    # ================= TAB 2: ANALYTICS =================
     with tab_analytics:
         st.header("📈 Breakout Detector")
-        st.info("Select a player to see if they are heating up (Rolling 5-Game Average).")
-
         skater_options = df[df['PosType'] == 'Skater'].sort_values('Pts', ascending=False)
         player_dict = dict(zip(skater_options['Player'], skater_options['ID']))
+        selected_player_name = st.selectbox("Select Player:", skater_options['Player'].unique())
         
-        selected_player_name = st.selectbox("Select Player to Analyze:", skater_options['Player'].unique())
-
         if selected_player_name:
             pid = player_dict[selected_player_name]
-            with st.spinner(f"Fetching game log for {selected_player_name}..."):
-                game_log = get_player_game_log(pid)
-            
+            game_log = get_player_game_log(pid)
             if not game_log.empty:
                 game_log['Rolling Points (Last 5)'] = game_log['points'].rolling(window=5, min_periods=1).mean()
                 chart_data = game_log[['gameDate', 'points', 'Rolling Points (Last 5)']].set_index('gameDate')
-                
-                st.line_chart(chart_data, color=["#d3d3d3", "#ff4b4b"]) 
-                st.caption("Grey: Daily Points | Red: Trend Line (5-Game Avg)")
-            else:
-                st.warning("No game log data available for this player.")
-
+                st.line_chart(chart_data, color=["#d3d3d3", "#ff4b4b"])
+        
         st.divider()
-
         st.subheader("League Summary Table")
         
+        # --- ADVANCED COLUMN CONFIG ---
         column_config = {
             "ID": None,
             "Player": st.column_config.TextColumn("Player", pinned=True),
-            "Team": st.column_config.TextColumn("Team", help="Team"),
-            "Pos": st.column_config.TextColumn("Pos", help="Position"),
+            "Team": st.column_config.TextColumn("Team"),
+            "Pos": st.column_config.TextColumn("Pos"),
+            # Basic Stats
             "GP": st.column_config.NumberColumn("GP", help="Games Played"),
             "G": st.column_config.NumberColumn("G", help="Goals"),
             "A": st.column_config.NumberColumn("A", help="Assists"),
             "Pts": st.column_config.NumberColumn("Pts", help="Points"),
+            "PPP": st.column_config.NumberColumn("PPP", help="Power Play Points"),
+            "SOG": st.column_config.NumberColumn("SOG", help="Shots on Goal"),
+            # Advanced Skater Stats
+            "Hits": st.column_config.NumberColumn("Hits", help="Total Hits"),
+            "BkS": st.column_config.NumberColumn("BkS", help="Blocked Shots"),
+            "SAT%": st.column_config.NumberColumn("SAT%", help="Corsi % (Shot Attempts For / Total Attempts). >50% means team controls puck.", format="%.1f%%"),
+            "USAT%": st.column_config.NumberColumn("USAT%", help="Fenwick % (Unblocked Shot Attempts).", format="%.1f%%"),
+            # Goalie Stats
             "W": st.column_config.NumberColumn("W", help="Wins"),
-            "SV%": st.column_config.NumberColumn("SV%", help="Save %", format="%.3f"),
-            "GAA": st.column_config.NumberColumn("GAA", help="GAA", format="%.2f"),
-            "TOI": st.column_config.TextColumn("TOI", help="Time On Ice")
+            "SV%": st.column_config.NumberColumn("SV%", help="Save Percentage", format="%.3f"),
+            "GAA": st.column_config.NumberColumn("GAA", help="Goals Against Average", format="%.2f"),
+            "GSAA": st.column_config.NumberColumn("GSAA", help="Goals Saved Above Average (Calculated vs League Avg)", format="%.2f"),
+            "TOI": st.column_config.TextColumn("TOI")
         }
 
         with st.expander("Filter Options"):
@@ -206,15 +150,11 @@ else:
         filt_df = df.copy()
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
-        
-        st.dataframe(filt_df, use_container_width=True, hide_index=True, height=500, column_config=column_config)
+        st.dataframe(filt_df, use_container_width=True, hide_index=True, height=600, column_config=column_config)
 
-    # ==========================================
-    # TAB 3: MY FANTASY TEAM
-    # ==========================================
+    # ================= TAB 3: FANTASY =================
     with tab_fantasy:
         st.header("⚔️ My Roster")
-        
         col_up, _ = st.columns([1, 2])
         with col_up:
             uploaded_file = st.file_uploader("📂 Load Saved Roster", type=["csv"])
@@ -232,7 +172,6 @@ else:
             team_df = df[df['Player'].isin(my_team)]
             st.download_button("💾 Save Roster", team_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
             
-            st.markdown("### Team Totals")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Goals", int(team_df['G'].sum()))
             c2.metric("Points", int(team_df['Pts'].sum()))
