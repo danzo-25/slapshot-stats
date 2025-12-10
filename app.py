@@ -23,8 +23,11 @@ st.markdown("""
     .news-card { background-color: #1e1e1e; border-left: 4px solid #0083b8; padding: 10px; margin-bottom: 10px; border-radius: 4px; }
     .news-title { font-weight: bold; font-size: 1.05em; color: #fff; text-decoration: none; }
     .news-desc { font-size: 0.9em; color: #ccc; margin-top: 5px; }
-    .trade-win { border: 2px solid #4caf50; padding: 10px; border-radius: 5px; background-color: rgba(76, 175, 80, 0.1); }
-    .trade-loss { border: 2px solid #f44336; padding: 10px; border-radius: 5px; background-color: rgba(244, 67, 54, 0.1); }
+    
+    /* Trade Verdict Box */
+    .trade-box { padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: center; }
+    .trade-win { background-color: rgba(76, 175, 80, 0.15); border: 2px solid #4caf50; }
+    .trade-loss { background-color: rgba(244, 67, 54, 0.15); border: 2px solid #f44336; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -52,7 +55,8 @@ else:
             val_SO = st.number_input("Shutouts", value=3.0)
             val_OTL = st.number_input("OTL", value=1.0)
 
-    # --- GLOBAL CALCULATIONS ---
+    # --- GLOBAL CALCULATIONS (Current & ROS) ---
+    # 1. Current FP
     df['FP'] = (
         (df['G'] * val_G) + (df['A'] * val_A) + (df['PPP'] * val_PPP) + 
         (df['SHP'] * val_SHP) + (df['SOG'] * val_SOG) + (df['Hits'] * val_Hit) + 
@@ -60,8 +64,20 @@ else:
         (df['Svs'] * val_Svs) + (df['SO'] * val_SO) + (df['OTL'] * val_OTL)
     ).round(1)
 
+    # 2. Rest of Season (ROS) Projections for ALL Stats
     df['GamesRemaining'] = 82 - df['GP']
-    df['ROS_FP'] = (df['FP'] / df['GP']).fillna(0) * df['GamesRemaining']
+    
+    # Helper to calculate ROS for a column
+    def calc_ros(col_name):
+        # (Current / GP) * Remaining
+        # If GP is 0, return 0 to avoid division by zero
+        return (df[col_name] / df['GP']).fillna(0) * df['GamesRemaining']
+
+    # Create ROS columns for every stat we care about
+    stats_to_project = ['G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'FP', 'W', 'Svs', 'SO']
+    for stat in stats_to_project:
+        if stat in df.columns:
+            df[f'ROS_{stat}'] = calc_ros(stat)
 
     tab_home, tab_analytics, tab_tools, tab_fantasy = st.tabs(["🏠 Home", "📊 Data & Analytics", "🛠️ Fantasy Tools", "⚔️ My Fantasy Team"])
 
@@ -174,84 +190,141 @@ else:
         whole_num_cols = ['GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SO', 'OTL', '+/-']
         valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
         styled_df = styled_df.format("{:.0f}", subset=valid_whole)
-        styled_df = styled_df.format("{:.1f}", subset=['FP', 'Sh%', 'FO%', 'SAT%', 'USAT%'])
+        styled_df = styled_df.format("{:.1f}", subset=['FP', 'ROS_FP', 'Sh%', 'FO%', 'SAT%', 'USAT%'])
         styled_df = styled_df.format("{:.2f}", subset=['GAA', 'GSAA'])
         styled_df = styled_df.format("{:.3f}", subset=['SV%'])
 
-        cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining']]
+        cols = ['ID', 'Player', 'Team', 'Pos', 'FP', 'ROS_FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining'] and not c.startswith('ROS_')]
         st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_order=cols)
 
     # ================= TAB 3: FANTASY TOOLS (TRADE CALCULATOR) =================
     with tab_tools:
         st.header("⚖️ Trade Analyzer")
-        st.info("Compare players based on their **Rest of Season (ROS)** projection.")
+        st.info("Calculations are based on **Rest of Season (ROS) Projections**.")
         
-        # Use STATIC lists to prevent reset bugs
+        # Get all players
         all_players = sorted(df['Player'].unique().tolist())
 
-        c1, c_mid, c2 = st.columns([1, 0.2, 1])
+        # Initialize selection keys if needed
+        if "trade_send" not in st.session_state: st.session_state.trade_send = []
+        if "trade_recv" not in st.session_state: st.session_state.trade_recv = []
+
+        c1, c_mid, c2 = st.columns([1, 0.1, 1])
         
+        # --- DYNAMIC FILTERING ---
+        # Players selected in 'Receive' are removed from 'Send', and vice versa
+        avail_send = [p for p in all_players if p not in st.session_state.trade_recv]
+        avail_recv = [p for p in all_players if p not in st.session_state.trade_send]
+
         with c1:
             st.subheader("📤 Sending")
-            sending = st.multiselect("Your Players", options=all_players, key="trade_send")
+            sending = st.multiselect("Search Players", options=avail_send, key="trade_send", placeholder="Type to search...")
             
         with c2:
             st.subheader("📥 Receiving")
-            receiving = st.multiselect("Their Players", options=all_players, key="trade_recv")
+            receiving = st.multiselect("Search Players", options=avail_recv, key="trade_recv", placeholder="Type to search...")
 
-        # LOGIC: Show comparison if AT LEAST ONE player is selected
+        # Calculate Logic
         if sending or receiving:
             st.divider()
             
-            # Prepare Dataframes
+            # Filter Data
             df_send = df[df['Player'].isin(sending)]
             df_recv = df[df['Player'].isin(receiving)]
             
-            # Calculate Totals
-            send_fp = df_send['ROS_FP'].sum()
-            recv_fp = df_recv['ROS_FP'].sum()
-            diff = recv_fp - send_fp
+            # --- CALCULATE TOTALS (ROS) ---
+            # We sum up the ROS columns we created earlier
+            stats_map = {
+                'Fantasy Points': 'ROS_FP',
+                'Goals': 'ROS_G',
+                'Assists': 'ROS_A',
+                'Points': 'ROS_Pts',
+                'PPP': 'ROS_PPP',
+                'SOG': 'ROS_SOG',
+                'Hits': 'ROS_Hits',
+                'Blocks': 'ROS_BkS',
+                'Wins': 'ROS_W'
+            }
             
-            # --- VERDICT ---
-            if sending and receiving:
-                st.subheader("The Verdict")
-                if diff > 0:
-                    st.markdown(f"""<div class="trade-win"><h3>✅ You Win!</h3><p>Net Gain: <b>+{diff:.1f} FP</b></p></div>""", unsafe_allow_html=True)
-                elif diff < 0:
-                    st.markdown(f"""<div class="trade-loss"><h3>❌ You Lose.</h3><p>Net Loss: <b>{diff:.1f} FP</b></p></div>""", unsafe_allow_html=True)
-                else:
-                    st.info("⚠️ This trade is perfectly even.")
+            # Build Summary Data
+            summary_data = []
+            for label, col in stats_map.items():
+                if col in df.columns:
+                    val_s = df_send[col].sum()
+                    val_r = df_recv[col].sum()
+                    diff = val_r - val_s
+                    summary_data.append({
+                        'Stat': label,
+                        'Sending (Total)': val_s,
+                        'Receiving (Total)': val_r,
+                        'Net Change': diff
+                    })
             
-            st.markdown("---")
+            summary_df = pd.DataFrame(summary_data).set_index('Stat')
 
-            # --- COMPARISON TABLE ---
-            st.markdown("#### Player Comparison")
-            
-            # Combine
-            df_compare = pd.concat([df_send, df_recv])
-            
-            if not df_compare.empty:
-                df_compare = df_compare.set_index('Player')
-                
-                # Define columns to show
-                stats_cols = ['Team', 'Pos', 'G', 'A', 'Pts', 'PPP', 'SOG', 'Hits', 'BkS', 'FP', 'ROS_FP']
-                # Filter to only cols that exist
-                valid_stats = [c for c in stats_cols if c in df_compare.columns]
-                
-                # Transpose
-                df_compare_T = df_compare[valid_stats].T
-                
-                # Style
-                styled_compare = df_compare_T.style
-                whole_rows = ['G', 'A', 'Pts', 'PPP', 'SOG', 'Hits', 'BkS']
-                valid_whole = [r for r in whole_rows if r in df_compare_T.index]
-                styled_compare = styled_compare.format("{:.0f}", subset=pd.IndexSlice[valid_whole, :])
-                
-                dec_rows = ['FP', 'ROS_FP']
-                valid_dec = [r for r in dec_rows if r in df_compare_T.index]
-                styled_compare = styled_compare.format("{:.1f}", subset=pd.IndexSlice[valid_dec, :])
+            # --- VERDICT BOX ---
+            net_fp = summary_df.loc['Fantasy Points', 'Net Change']
+            if net_fp > 0:
+                st.markdown(f"""
+                <div class="trade-box trade-win">
+                    <h2>✅ You Win!</h2>
+                    <p style="font-size: 1.2em;">Projected Gain: <b>+{net_fp:.1f} Fantasy Points</b> (Rest of Season)</p>
+                </div>
+                """, unsafe_allow_html=True)
+            elif net_fp < 0:
+                st.markdown(f"""
+                <div class="trade-box trade-loss">
+                    <h2>❌ You Lose.</h2>
+                    <p style="font-size: 1.2em;">Projected Loss: <b>{net_fp:.1f} Fantasy Points</b> (Rest of Season)</p>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.info("⚠️ This trade is perfectly even.")
 
-                st.dataframe(styled_compare, use_container_width=True)
+            # --- COMPARISON TABLE (COLOR CODED) ---
+            st.subheader("📊 Projected Totals (Rest of Season)")
+            
+            # Style Function: Green for higher value
+            def highlight_winner(row):
+                s_val = row['Sending (Total)']
+                r_val = row['Receiving (Total)']
+                
+                styles = [''] * 3 # Stat, Sending, Receiving, Net (index based)
+                
+                # Colors
+                green = 'color: #4caf50; font-weight: bold'
+                red = 'color: #f44336; font-weight: bold'
+                
+                if r_val > s_val:
+                    return ['', red, green, green] # Receiving wins (Green)
+                elif s_val > r_val:
+                    return ['', green, red, red] # Sending wins (Green)
+                return ['', '', '', '']
+
+            # Format numbers
+            styled_summary = summary_df.style.format("{:+.1f}", subset=['Net Change']) \
+                                             .format("{:.1f}", subset=['Sending (Total)', 'Receiving (Total)']) \
+                                             .apply(highlight_winner, axis=1)
+
+            st.dataframe(styled_summary, use_container_width=True)
+
+            # --- INDIVIDUAL PLAYERS ---
+            st.caption("Individual Player Projections (ROS)")
+            cols_to_show = ['Player', 'Team', 'Pos', 'ROS_FP', 'ROS_G', 'ROS_A', 'ROS_Pts', 'ROS_PPP', 'ROS_Hits', 'ROS_BkS']
+            
+            full_list = pd.concat([df_send, df_recv])
+            if not full_list.empty:
+                # Add a 'Side' column for clarity
+                full_list['Side'] = full_list['Player'].apply(lambda x: 'Receiving' if x in receiving else 'Sending')
+                
+                # Reorder columns
+                final_cols = ['Side'] + [c for c in cols_to_show if c in full_list.columns]
+                
+                st.dataframe(
+                    full_list[final_cols].style.format("{:.1f}", subset=[c for c in final_cols if 'ROS_' in c]),
+                    use_container_width=True,
+                    hide_index=True
+                )
 
 
     # ================= TAB 4: MY ROSTER =================
@@ -280,6 +353,6 @@ else:
             
             styled_team = team_df.style.format("{:.0f}", subset=[c for c in whole_num_cols if c in team_df.columns])
             styled_team = styled_team.format("{:.1f}", subset=['FP'])
-            cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining']]
+            cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining'] and not c.startswith('ROS_')]
             st.dataframe(styled_team, use_container_width=True, hide_index=True, column_order=cols)
 
