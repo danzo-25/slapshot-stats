@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix
+from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news
 
 st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
 st.title("🏒 NHL 2025-26 Dashboard")
@@ -20,6 +20,17 @@ st.markdown("""
     .team-name { font-weight: 900; font-size: 1em; margin-top: -2px; }
     .vs-text { font-size: 1em; font-weight: bold; color: #888; padding-top: 5px; }
     .game-time { margin-top: 5px; font-weight: bold; color: #FF4B4B; font-size: 0.9em; border-top: 1px solid #41444e; padding-top: 2px; }
+    
+    /* NEWS STYLING */
+    .news-card {
+        background-color: #1e1e1e;
+        border-left: 4px solid #0083b8;
+        padding: 10px;
+        margin-bottom: 10px;
+        border-radius: 4px;
+    }
+    .news-title { font-weight: bold; font-size: 1.05em; color: #fff; text-decoration: none; }
+    .news-desc { font-size: 0.9em; color: #ccc; margin-top: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -64,43 +75,57 @@ else:
                             """, unsafe_allow_html=True)
         st.divider()
 
-        # 2. STRENGTH OF SCHEDULE (SOS)
-        st.header("💪 Strength of Schedule (Weekly View)")
-        st.caption("Green = Easy Matchup (You are favored). Red = Hard Matchup (Opponent is favored).")
-        
-        with st.spinner("Calculating matchup difficulty..."):
-            sos_matrix, standings = get_weekly_schedule_matrix()
-        
-        if not sos_matrix.empty and standings:
-            def color_sos(val, my_team_abbr):
-                if not val or val == "": return 'background-color: #262730'
-                opp_abbr = val.split(" ")[1] 
-                my_str = standings.get(my_team_abbr, 0.5)
-                opp_str = standings.get(opp_abbr, 0.5)
-                diff = my_str - opp_str
-                
-                if diff > 0.15: return 'background-color: #1b5e20; color: white'
-                elif diff > 0.05: return 'background-color: #2e7d32; color: white'
-                elif diff > 0.00: return 'background-color: #4caf50; color: black'
-                elif diff > -0.05: return 'background-color: #fbc02d; color: black'
-                elif diff > -0.15: return 'background-color: #c62828; color: white'
-                else: return 'background-color: #b71c1c; color: white'
+        # --- SPLIT LAYOUT: SOS (Left) | NEWS (Right) ---
+        col_sos, col_news = st.columns([2, 1])
 
-            # Apply Style
-            styled_sos = sos_matrix.style.apply(lambda row: [color_sos(val, row.name) for val in row], axis=1)
+        with col_sos:
+            st.header("💪 Strength of Schedule")
+            st.caption("Green = You are favored. Red = Opponent is favored.")
             
-            # --- FIX: CENTER TEXT ---
-            styled_sos = styled_sos.set_properties(**{'text-align': 'center'})
+            with st.spinner("Calculating matchup difficulty..."):
+                sos_matrix, standings = get_weekly_schedule_matrix()
+            
+            if not sos_matrix.empty and standings:
+                def color_sos(val, my_team_abbr):
+                    if not val or val == "": return 'background-color: #262730'
+                    opp_abbr = val.split(" ")[1] 
+                    my_str = standings.get(my_team_abbr, 0.5)
+                    opp_str = standings.get(opp_abbr, 0.5)
+                    diff = my_str - opp_str
+                    
+                    if diff > 0.15: return 'background-color: #1b5e20; color: white'
+                    elif diff > 0.05: return 'background-color: #2e7d32; color: white'
+                    elif diff > 0.00: return 'background-color: #4caf50; color: black'
+                    elif diff > -0.05: return 'background-color: #fbc02d; color: black'
+                    elif diff > -0.15: return 'background-color: #c62828; color: white'
+                    else: return 'background-color: #b71c1c; color: white'
 
-            # --- FIX: MAKE TABLE NARROWER ---
-            # use_container_width=False makes it strictly respect content size
-            st.dataframe(styled_sos, use_container_width=False, height=500, width=800)
-        else:
-            st.info("Strength of Schedule data unavailable.")
+                styled_sos = sos_matrix.style.apply(lambda row: [color_sos(val, row.name) for val in row], axis=1)
+                styled_sos = styled_sos.set_properties(**{'text-align': 'center'})
+                
+                # Render SOS Table
+                st.dataframe(styled_sos, use_container_width=True, height=500)
+            else:
+                st.info("Strength of Schedule data unavailable.")
+
+        with col_news:
+            st.header("📰 Latest News")
+            news = load_nhl_news()
+            
+            if news:
+                for article in news:
+                    st.markdown(f"""
+                    <div class="news-card">
+                        <a href="{article['link']}" target="_blank" class="news-title">{article['headline']}</a>
+                        <div class="news-desc">{article['description']}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("No news available currently.")
 
         st.divider()
 
-        # 3. WEEKLY CHARTS (RESTORED ALL 4)
+        # 3. WEEKLY CHARTS
         st.header("🔥 Hot This Week (Last 7 Days)")
         with st.spinner("Loading weekly trends..."):
             df_weekly = load_weekly_leaders()
@@ -119,8 +144,6 @@ else:
             c1, c2 = st.columns(2)
             with c1: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
             with c2: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
-            
-            # --- RESTORED SOG & PPP CHARTS ---
             c3, c4 = st.columns(2)
             with c3: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
             with c4: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
@@ -187,64 +210,4 @@ else:
             "W": st.column_config.NumberColumn("W", format="%.0f"),
             "GA": st.column_config.NumberColumn("GA", format="%.0f"),
             "Svs": st.column_config.NumberColumn("Svs", format="%.0f"),
-            "SO": st.column_config.NumberColumn("SO", format="%.0f"),
-            "SAT%": st.column_config.NumberColumn("SAT%", format="%.1f%%"),
-            "USAT%": st.column_config.NumberColumn("USAT%", format="%.1f%%"),
-            "SV%": st.column_config.NumberColumn("SV%", format="%.3f"),
-            "GAA": st.column_config.NumberColumn("GAA", format="%.2f"),
-            "GSAA": st.column_config.NumberColumn("GSAA", format="%.2f"),
-            "TOI": st.column_config.TextColumn("TOI")
-        }
-
-        with st.expander("Filter Options"):
-            c1, c2 = st.columns(2)
-            teams = sorted(df['Team'].unique())
-            sel_teams = c1.multiselect("Team", teams, default=teams)
-            pos = sorted(df['Pos'].unique())
-            sel_pos = c2.multiselect("Position", pos, default=pos)
-
-        filt_df = df.copy()
-        if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
-        if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
-
-        def highlight_my_team(row):
-            return ['background-color: #574d28'] * len(row) if row['Player'] in st.session_state.my_roster else [''] * len(row)
-
-        styled_df = filt_df.style.apply(highlight_my_team, axis=1)
-        
-        whole_num_cols = ['GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SO', 'OTL', '+/-']
-        valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
-        styled_df = styled_df.format("{:.0f}", subset=valid_whole)
-        styled_df = styled_df.format("{:.1f}", subset=['FP', 'Sh%', 'FO%', 'SAT%', 'USAT%'])
-        styled_df = styled_df.format("{:.2f}", subset=['GAA', 'GSAA'])
-        styled_df = styled_df.format("{:.3f}", subset=['SV%'])
-
-        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_config=column_config)
-
-    # ================= TAB 3: FANTASY =================
-    with tab_fantasy:
-        st.header("⚔️ My Roster")
-        col_up, _ = st.columns([1, 2])
-        uploaded_file = col_up.file_uploader("📂 Load Saved Roster", type=["csv"])
-        if uploaded_file:
-            try:
-                udf = pd.read_csv(uploaded_file)
-                if "Player" in udf.columns: 
-                    st.session_state.my_roster = [p for p in udf["Player"] if p in df['Player'].values]
-            except: pass
-
-        selected_players = st.multiselect("Search Players:", df['Player'].unique(), default=st.session_state.my_roster)
-        st.session_state.my_roster = selected_players
-
-        if selected_players:
-            team_df = df[df['Player'].isin(selected_players)]
-            st.download_button("💾 Save Roster", team_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Goals", int(team_df['G'].sum()))
-            c2.metric("Points", int(team_df['Pts'].sum()))
-            c3.metric("Total FP", f"{team_df['FP'].sum():,.1f}")
-            c4.metric("Goalie Wins", int(team_df['W'].sum()))
-            
-            styled_team = team_df.style.format("{:.0f}", subset=[c for c in whole_num_cols if c in team_df.columns])
-            styled_team = styled_team.format("{:.1f}", subset=['FP'])
-            st.dataframe(styled_team, use_container_width=True, hide_index=True, column_config=column_config)
+            "SO": st
