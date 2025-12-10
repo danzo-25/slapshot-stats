@@ -1,60 +1,31 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders
+from data_loader import load_nhl_data, get_player_game_log, load_schedule, get_weekly_hot_players
 
 st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
 st.title("🏒 NHL 2025-26 Dashboard")
 
-# --- CUSTOM CSS FOR SCHEDULE ---
-# This forces the boxes to be smaller, centered, and nice looking
+# CSS for Schedule
 st.markdown("""
 <style>
     .game-card {
-        background-color: #262730; /* Dark grey for dark mode compatibility */
+        background-color: #262730;
         border: 1px solid #41444e;
         border-radius: 8px;
         padding: 10px;
         margin-bottom: 10px;
         text-align: center;
     }
-    .team-row {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 15px;
-    }
-    .team-info {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        width: 80px; /* Fixed width to prevent jumping */
-    }
-    .team-logo {
-        width: 60px; /* Larger Icons */
-        height: 60px;
-        object-fit: contain;
-        margin-bottom: 5px;
-    }
-    .team-name {
-        font-weight: 900; /* Bold */
-        font-size: 1.1em;
-    }
-    .vs-text {
-        font-size: 0.9em;
-        font-weight: bold;
-        color: #aaa;
-    }
-    .game-time {
-        margin-top: 8px;
-        font-weight: bold;
-        color: #FF4B4B; /* Streamlit Red for contrast */
-        font-size: 0.9em;
-    }
+    .team-row { display: flex; justify-content: center; align-items: center; gap: 15px; }
+    .team-info { display: flex; flex-direction: column; align-items: center; width: 80px; }
+    .team-logo { width: 60px; height: 60px; object-fit: contain; margin-bottom: 5px; }
+    .team-name { font-weight: 900; font-size: 1.1em; }
+    .vs-text { font-size: 0.9em; font-weight: bold; color: #aaa; }
+    .game-time { margin-top: 8px; font-weight: bold; color: #FF4B4B; font-size: 0.9em; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- LOAD DATA ---
 with st.spinner('Loading NHL Data...'):
     df = load_nhl_data()
 
@@ -63,25 +34,20 @@ if df.empty:
 else:
     tab_home, tab_analytics, tab_fantasy = st.tabs(["🏠 Home", "📊 Data & Analytics", "⚔️ My Fantasy Team"])
 
-    # ==========================================
-    # TAB 1: HOME
-    # ==========================================
+    # ================= TAB 1: HOME =================
     with tab_home:
-        # --- SCHEDULE ---
+        # SCHEDULE
         st.header("📅 Today's Games")
         schedule = load_schedule()
-        
         if not schedule:
             st.info("No games scheduled for today.")
         else:
-            # Grid Layout: 3 Games per Row
             for i in range(0, len(schedule), 3):
                 cols = st.columns(3)
                 for j in range(3):
                     if i + j < len(schedule):
                         game = schedule[i+j]
                         with cols[j]:
-                            # CUSTOM HTML CARD
                             st.markdown(f"""
                             <div class="game-card">
                                 <div class="team-row">
@@ -98,88 +64,58 @@ else:
                                 <div class="game-time">{game['time']}</div>
                             </div>
                             """, unsafe_allow_html=True)
-
         st.divider()
 
-        # --- WEEKLY LEADERS (ALTAIR CHARTS) ---
+        # WEEKLY CHARTS
         st.header("🔥 Hot This Week (Last 7 Days)")
+        st.caption("Tracking top season performers over their last few games.")
         
-        with st.spinner("Loading weekly trends..."):
-            df_weekly = load_weekly_leaders()
+        with st.spinner("Calculating weekly trends..."):
+            df_weekly = get_weekly_hot_players()
         
         if not df_weekly.empty:
-            
-            # Helper function to create the clean chart you requested
             def make_chart(data, x_col, y_col, color, title):
-                # Base Chart
                 base = alt.Chart(data).encode(
-                    x=alt.X(f'{x_col}:N', axis=alt.Axis(labelAngle=0, title=None)), # Horizontal Labels
-                    y=alt.Y(f'{y_col}:Q', axis=None), # Remove Y axis numbers for cleaner look
+                    x=alt.X(f'{x_col}:N', axis=alt.Axis(labelAngle=0, title=None)),
+                    y=alt.Y(f'{y_col}:Q', axis=None),
                     tooltip=['Player', y_col]
                 )
-                
-                # The Bars (Thinner using 'size')
-                bars = base.mark_bar(size=30, color=color, cornerRadiusTopLeft=5, cornerRadiusTopRight=5).encode(
-                    y=f'{y_col}:Q'
-                )
-                
-                # The Text Labels (Numbers on top)
-                text = base.mark_text(align='center', baseline='bottom', dy=-5, fontWeight='bold').encode(
-                    text=f'{y_col}:Q'
-                )
-                
-                # Combine
+                bars = base.mark_bar(size=30, color=color, cornerRadiusTopLeft=5, cornerRadiusTopRight=5).encode(y=f'{y_col}:Q')
+                text = base.mark_text(align='center', baseline='bottom', dy=-5, fontWeight='bold').encode(text=f'{y_col}:Q')
                 return (bars + text).properties(title=title, height=250)
 
-            # Create Data Subsets
             top_g = df_weekly.sort_values('G', ascending=False).head(5)
             top_pts = df_weekly.sort_values('Pts', ascending=False).head(5)
             top_sog = df_weekly.sort_values('SOG', ascending=False).head(5)
             top_ppp = df_weekly.sort_values('PPP', ascending=False).head(5)
 
-            # Display
             c1, c2 = st.columns(2)
-            with c1:
-                st.altair_chart(make_chart(top_g, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
-            with c2:
-                st.altair_chart(make_chart(top_pts, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
+            with c1: st.altair_chart(make_chart(top_g, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
+            with c2: st.altair_chart(make_chart(top_pts, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
             
             c3, c4 = st.columns(2)
-            with c3:
-                st.altair_chart(make_chart(top_sog, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
-            with c4:
-                st.altair_chart(make_chart(top_ppp, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
-
+            with c3: st.altair_chart(make_chart(top_sog, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
+            with c4: st.altair_chart(make_chart(top_ppp, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
         else:
-            st.info("No weekly data available yet.")
+            st.info("No weekly data available. The API might be returning partial data.")
 
-
-    # ==========================================
-    # TAB 2: DATA & ANALYTICS
-    # ==========================================
+    # ================= TAB 2: ANALYTICS =================
     with tab_analytics:
         st.header("📈 Breakout Detector")
-        st.info("Select a player to see if they are heating up (Rolling 5-Game Average).")
-
         skater_options = df[df['PosType'] == 'Skater'].sort_values('Pts', ascending=False)
         player_dict = dict(zip(skater_options['Player'], skater_options['ID']))
+        selected_player_name = st.selectbox("Select Player:", skater_options['Player'].unique())
         
-        selected_player_name = st.selectbox("Select Player to Analyze:", skater_options['Player'].unique())
-
         if selected_player_name:
             pid = player_dict[selected_player_name]
-            with st.spinner(f"Fetching game log for {selected_player_name}..."):
-                game_log = get_player_game_log(pid)
-            
+            game_log = get_player_game_log(pid)
             if not game_log.empty:
                 game_log['Rolling Points (Last 5)'] = game_log['points'].rolling(window=5, min_periods=1).mean()
                 chart_data = game_log[['gameDate', 'points', 'Rolling Points (Last 5)']].set_index('gameDate')
-                st.line_chart(chart_data, color=["#d3d3d3", "#ff4b4b"]) 
-            else:
-                st.warning("No game log data available.")
-
+                st.line_chart(chart_data, color=["#d3d3d3", "#ff4b4b"])
+        
         st.divider()
-        st.subheader("League Summary Table")
+        st.subheader("League Summary")
         
         column_config = {
             "ID": None,
@@ -210,9 +146,7 @@ else:
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
         st.dataframe(filt_df, use_container_width=True, hide_index=True, height=500, column_config=column_config)
 
-    # ==========================================
-    # TAB 3: MY FANTASY TEAM
-    # ==========================================
+    # ================= TAB 3: FANTASY =================
     with tab_fantasy:
         st.header("⚔️ My Roster")
         col_up, _ = st.columns([1, 2])
@@ -232,7 +166,6 @@ else:
             team_df = df[df['Player'].isin(my_team)]
             st.download_button("💾 Save Roster", team_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
             
-            st.markdown("### Team Totals")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Goals", int(team_df['G'].sum()))
             c2.metric("Points", int(team_df['Pts'].sum()))
@@ -240,8 +173,6 @@ else:
             c4.metric("Goalie SO", int(team_df['SO'].sum()))
             
             st.dataframe(team_df, use_container_width=True, hide_index=True, column_config=column_config)
-
-
 
 
 
