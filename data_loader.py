@@ -28,6 +28,8 @@ def load_nhl_data():
     df_skaters = fetch_data("skater", "points")
     if not df_skaters.empty:
         df_skaters['PosType'] = 'Skater'
+        # Rename Skater Columns
+        # We MUST rename 'playerId' to 'ID' here for the trend graph to work
         df_skaters = df_skaters.rename(columns={
             'skaterFullName': 'Player', 'playerId': 'ID', 'teamAbbrevs': 'Team', 'positionCode': 'Pos',
             'gamesPlayed': 'GP', 'goals': 'G', 'assists': 'A', 'points': 'Pts',
@@ -41,6 +43,7 @@ def load_nhl_data():
     if not df_goalies.empty:
         df_goalies['PosType'] = 'Goalie'
         df_goalies['Pos'] = 'G'
+        # Rename Goalie Columns
         df_goalies = df_goalies.rename(columns={
             'goalieFullName': 'Player', 'playerId': 'ID', 'teamAbbrevs': 'Team',
             'gamesPlayed': 'GP', 'wins': 'W', 'losses': 'L', 'otLosses': 'OTL',
@@ -49,25 +52,38 @@ def load_nhl_data():
         })
 
     # 3. Combine
-    df_combined = pd.concat([df_skaters, df_goalies], ignore_index=True)
-    if df_combined.empty: return pd.DataFrame()
+    # Handle cases where one API call fails but the other works
+    if df_skaters.empty and df_goalies.empty:
+        return pd.DataFrame()
+    elif df_skaters.empty:
+        df_combined = df_goalies
+    elif df_goalies.empty:
+        df_combined = df_skaters
+    else:
+        df_combined = pd.concat([df_skaters, df_goalies], ignore_index=True)
 
-    # 4. Clean
-    df_combined['Team'] = df_combined['Team'].apply(lambda x: x.split(',')[-1].strip() if isinstance(x, str) else 'N/A')
+    # 4. Clean Data
+    # Fix Team Names (Handle "CGY, TOR")
+    if 'Team' in df_combined.columns:
+        df_combined['Team'] = df_combined['Team'].apply(lambda x: x.split(',')[-1].strip() if isinstance(x, str) else 'N/A')
+    else:
+        df_combined['Team'] = 'N/A'
+    
     df_combined['Player'] = df_combined['Player'].fillna('Unknown')
     
-    # Fill Numeric
+    # Fill Numeric Columns with 0
     numeric_cols = ['GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'PPG', 'SHP', 'GWG', 'SOG', 'Sh%', 'FO%', 'W', 'L', 'OTL', 'GAA', 'SV%', 'SO']
     for col in numeric_cols:
         if col not in df_combined.columns: df_combined[col] = 0
         df_combined[col] = pd.to_numeric(df_combined[col], errors='coerce').fillna(0)
 
+    # Keep ID column!
     cols_to_keep = ['ID', 'Player', 'Team', 'Pos', 'PosType'] + numeric_cols + ['TOI']
     final_cols = [c for c in cols_to_keep if c in df_combined.columns]
     
     return df_combined[final_cols]
 
-# --- NEW FUNCTION FOR TRENDS ---
+# --- THIS FUNCTION WAS LIKELY MISSING ---
 def get_player_game_log(player_id):
     """
     Fetches the game-by-game log for a specific player for 2025-2026.
@@ -83,12 +99,12 @@ def get_player_game_log(player_id):
         if not games: return pd.DataFrame()
 
         df_log = pd.DataFrame(games)
-        # Ensure date is datetime for plotting
         df_log['gameDate'] = pd.to_datetime(df_log['gameDate'])
-        return df_log.sort_values(by='gameDate') # Sort Oldest to Newest
+        return df_log.sort_values(by='gameDate')
     except Exception as e:
         print(f"Error fetching game log: {e}")
         return pd.DataFrame()
+
 
 
 
