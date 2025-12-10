@@ -324,4 +324,8 @@ else:
             c3.metric("Total FP", f"{team_df['FP'].sum():,.1f}")
             c4.metric("Goalie Wins", int(team_df['W'].sum()))
             
-            styled_team =
+            styled_team = team_df.style.format("{:.0f}", subset=[c for c in whole_num_cols if c in team_df.columns])
+            styled_team = styled_team.format("{:.1f}", subset=['FP'])
+            cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining']]
+            st.dataframe(styled_team, use_container_width=True, hide_index=True, column_order=cols)
+
