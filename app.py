@@ -153,21 +153,21 @@ else:
             "FP": st.column_config.NumberColumn("FP", help="Fantasy Points", format="%.1f"),
             "Team": st.column_config.TextColumn("Team"),
             "Pos": st.column_config.TextColumn("Pos"),
-            "GP": st.column_config.NumberColumn("GP", help="Games Played"),
-            "G": st.column_config.NumberColumn("G", help="Goals"),
-            "A": st.column_config.NumberColumn("A", help="Assists"),
-            "Pts": st.column_config.NumberColumn("Pts", help="Points"),
-            "PPP": st.column_config.NumberColumn("PPP", help="PPP"),
-            "SHP": st.column_config.NumberColumn("SHP", help="SHP"),
-            "SOG": st.column_config.NumberColumn("SOG", help="SOG"),
-            "Hits": st.column_config.NumberColumn("Hits", help="Hits"),
-            "BkS": st.column_config.NumberColumn("BkS", help="Blocks"),
-            "SAT%": st.column_config.NumberColumn("SAT%", help="Corsi %", format="%.1f%%"),
-            "USAT%": st.column_config.NumberColumn("USAT%", help="Fenwick %", format="%.1f%%"),
-            "W": st.column_config.NumberColumn("W", help="Wins"),
-            "SV%": st.column_config.NumberColumn("SV%", format="%.3f"),
-            "GAA": st.column_config.NumberColumn("GAA", format="%.2f"),
-            "GSAA": st.column_config.NumberColumn("GSAA", format="%.2f"),
+            "GP": st.column_config.NumberColumn("GP"),
+            "G": st.column_config.NumberColumn("G"),
+            "A": st.column_config.NumberColumn("A"),
+            "Pts": st.column_config.NumberColumn("Pts"),
+            "PPP": st.column_config.NumberColumn("PPP"),
+            "SHP": st.column_config.NumberColumn("SHP"),
+            "SOG": st.column_config.NumberColumn("SOG"),
+            "Hits": st.column_config.NumberColumn("Hits"),
+            "BkS": st.column_config.NumberColumn("BkS"),
+            "SAT%": st.column_config.NumberColumn("SAT%"),
+            "USAT%": st.column_config.NumberColumn("USAT%"),
+            "W": st.column_config.NumberColumn("W"),
+            "SV%": st.column_config.NumberColumn("SV%"),
+            "GAA": st.column_config.NumberColumn("GAA"),
+            "GSAA": st.column_config.NumberColumn("GSAA"),
             "TOI": st.column_config.TextColumn("TOI")
         }
 
@@ -195,17 +195,31 @@ else:
         # APPLY HIGHLIGHTING
         styled_df = filt_df.style.apply(highlight_my_team, axis=1)
 
-        # --- CRITICAL FIX: FORCE FORMATTING VIA PANDAS STYLER ---
-        # This overrides Streamlit's display logic to force 0 decimals
-        whole_num_cols = ['GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SO', 'OTL']
-        # Intersect with columns actually in the dataframe to prevent errors
+        # --- FIX: FULL FORMATTING RULES ---
+        # 1. Whole Numbers (No Decimals)
+        whole_num_cols = [
+            'GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'GWG', 
+            'W', 'L', 'OTL', 'GA', 'Svs', 'SO', '+/-'
+        ]
         valid_whole_cols = [c for c in whole_num_cols if c in filt_df.columns]
-        
         styled_df = styled_df.format("{:.0f}", subset=valid_whole_cols)
+
+        # 2. Percentages (1 decimal)
+        pct_cols = ['Sh%', 'FO%', 'SAT%', 'USAT%']
+        valid_pct_cols = [c for c in pct_cols if c in filt_df.columns]
+        styled_df = styled_df.format("{:.1f}", subset=valid_pct_cols)
+
+        # 3. Decimals (FP, GAA, GSAA)
         styled_df = styled_df.format("{:.1f}", subset=['FP'])
         styled_df = styled_df.format("{:.2f}", subset=['GAA', 'GSAA'])
         styled_df = styled_df.format("{:.3f}", subset=['SV%'])
-        # -------------------------------------------------------
+        
+        # 4. Time On Ice (Treat as string or format if numeric)
+        if 'TOI' in filt_df.columns:
+            # Check if TOI is numeric (it might be string "20:00" or float 20.0)
+            # If float, we format it. If string, Styler ignores it.
+            if pd.api.types.is_numeric_dtype(filt_df['TOI']):
+                 styled_df = styled_df.format("{:.2f}", subset=['TOI'])
 
         st.dataframe(
             styled_df, 
@@ -250,7 +264,7 @@ else:
             c4.metric("Goalie Wins", int(team_df['W'].sum()))
             
             # Apply same formatting to roster table
-            styled_team_df = team_df.style.format("{:.0f}", subset=[c for c in whole_num_cols if c in team_df.columns])
-            styled_team_df = styled_team_df.format("{:.1f}", subset=['FP'])
+            styled_team = team_df.style.format("{:.0f}", subset=[c for c in whole_num_cols if c in team_df.columns])
+            styled_team = styled_team.format("{:.1f}", subset=['FP'])
             
-            st.dataframe(styled_team_df, use_container_width=True, hide_index=True, column_config=column_config)
+            st.dataframe(styled_team, use_container_width=True, hide_index=True, column_config=column_config)
