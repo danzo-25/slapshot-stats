@@ -1,28 +1,61 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-from data_loader import load_nhl_data, get_player_game_log, load_schedule, get_weekly_hot_players
+from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders
 
 st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
 st.title("🏒 NHL 2025-26 Dashboard")
 
-# CSS for Schedule
+# --- CUSTOM CSS FOR SCHEDULE ---
 st.markdown("""
 <style>
     .game-card {
         background-color: #262730;
         border: 1px solid #41444e;
         border-radius: 8px;
-        padding: 10px;
-        margin-bottom: 10px;
+        padding: 15px 10px; /* More vertical padding, tight horizontal */
+        margin-bottom: 15px;
         text-align: center;
+        max-width: 350px; /* Constrain width */
+        margin-left: auto;
+        margin-right: auto;
     }
-    .team-row { display: flex; justify-content: center; align-items: center; gap: 15px; }
-    .team-info { display: flex; flex-direction: column; align-items: center; width: 80px; }
-    .team-logo { width: 60px; height: 60px; object-fit: contain; margin-bottom: 5px; }
-    .team-name { font-weight: 900; font-size: 1.1em; }
-    .vs-text { font-size: 0.9em; font-weight: bold; color: #aaa; }
-    .game-time { margin-top: 8px; font-weight: bold; color: #FF4B4B; font-size: 0.9em; }
+    .team-row {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 20px; /* Space between icons */
+    }
+    .team-info {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 60px;
+    }
+    .team-logo {
+        width: 55px; /* Larger Icons */
+        height: 55px;
+        object-fit: contain;
+        margin-bottom: 5px;
+    }
+    .team-name {
+        font-weight: 900; /* Bold */
+        font-size: 1.2em; /* Larger text */
+        line-height: 1.1;
+    }
+    .vs-text {
+        font-size: 1.2em;
+        font-weight: bold;
+        color: #888;
+        margin-top: -10px; /* Align slightly up */
+    }
+    .game-time {
+        margin-top: 10px;
+        font-weight: bold;
+        color: #FF4B4B;
+        font-size: 1.0em;
+        letter-spacing: 0.5px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -66,24 +99,36 @@ else:
                             """, unsafe_allow_html=True)
         st.divider()
 
-        # WEEKLY CHARTS
+        # WEEKLY CHARTS (Using Restored API Function)
         st.header("🔥 Hot This Week (Last 7 Days)")
-        st.caption("Tracking top season performers over their last few games.")
+        st.caption("Top performers based on API Aggregation.")
         
-        with st.spinner("Calculating weekly trends..."):
-            df_weekly = get_weekly_hot_players()
+        with st.spinner("Fetching weekly trends..."):
+            df_weekly = load_weekly_leaders()
         
         if not df_weekly.empty:
+            # Helper for Altair Charts (Visuals you requested)
             def make_chart(data, x_col, y_col, color, title):
+                # Base Chart
                 base = alt.Chart(data).encode(
-                    x=alt.X(f'{x_col}:N', axis=alt.Axis(labelAngle=0, title=None)),
-                    y=alt.Y(f'{y_col}:Q', axis=None),
+                    x=alt.X(f'{x_col}:N', axis=alt.Axis(labelAngle=0, title=None)), # Horizontal Labels
+                    y=alt.Y(f'{y_col}:Q', axis=None), # Hide Axis
                     tooltip=['Player', y_col]
                 )
-                bars = base.mark_bar(size=30, color=color, cornerRadiusTopLeft=5, cornerRadiusTopRight=5).encode(y=f'{y_col}:Q')
-                text = base.mark_text(align='center', baseline='bottom', dy=-5, fontWeight='bold').encode(text=f'{y_col}:Q')
-                return (bars + text).properties(title=title, height=250)
+                
+                # Bars (Thinner, Rounded)
+                bars = base.mark_bar(size=35, color=color, cornerRadiusTopLeft=6, cornerRadiusTopRight=6).encode(
+                    y=f'{y_col}:Q'
+                )
+                
+                # Labels (Numbers on top)
+                text = base.mark_text(align='center', baseline='bottom', dy=-5, fontWeight='bold', fontSize=12).encode(
+                    text=f'{y_col}:Q'
+                )
+                
+                return (bars + text).properties(title=title, height=280)
 
+            # Slicing Data
             top_g = df_weekly.sort_values('G', ascending=False).head(5)
             top_pts = df_weekly.sort_values('Pts', ascending=False).head(5)
             top_sog = df_weekly.sort_values('SOG', ascending=False).head(5)
@@ -97,7 +142,7 @@ else:
             with c3: st.altair_chart(make_chart(top_sog, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
             with c4: st.altair_chart(make_chart(top_ppp, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
         else:
-            st.info("No weekly data available. The API might be returning partial data.")
+            st.info("No weekly data returned from API. Please try again later.")
 
     # ================= TAB 2: ANALYTICS =================
     with tab_analytics:
@@ -173,6 +218,7 @@ else:
             c4.metric("Goalie SO", int(team_df['SO'].sum()))
             
             st.dataframe(team_df, use_container_width=True, hide_index=True, column_config=column_config)
+
 
 
 
