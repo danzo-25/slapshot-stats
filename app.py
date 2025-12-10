@@ -13,51 +13,51 @@ st.markdown("""
     .game-card {
         background-color: #262730;
         border: 1px solid #41444e;
-        border-radius: 10px;
-        padding: 10px; 
+        border-radius: 8px; /* Slightly tighter radius */
+        padding: 5px; /* Reduced padding */
         text-align: center;
-        margin: 0 auto 15px auto; /* Center horizontally, add bottom margin */
-        max-width: 220px; /* Force the box to be much smaller (Quarter size) */
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+        margin: 0 auto 5px auto; /* Reduced bottom margin to 5px */
+        max-width: 100%; /* Let it fill the column width */
+        box-shadow: 1px 1px 3px rgba(0,0,0,0.2);
     }
     .team-row {
         display: flex;
         justify-content: center;
         align-items: center;
-        gap: 10px;
+        gap: 5px; /* Tighter gap between teams */
     }
     .team-info {
         display: flex;
         flex-direction: column;
         align-items: center;
     }
-    /* ENLARGE ICONS */
+    /* ICONS */
     .team-logo {
-        width: 70px; 
-        height: 70px;
+        width: 55px; /* Good size for 5-column layout */
+        height: 55px;
         object-fit: contain;
-        margin-bottom: 5px;
+        margin-bottom: 2px;
     }
-    /* BOLD TEXT */
+    /* TEXT */
     .team-name {
         font-weight: 900;
-        font-size: 1.1em;
-        margin-top: -5px;
+        font-size: 1em;
+        margin-top: -2px;
     }
     .vs-text {
-        font-size: 1.2em;
+        font-size: 1em;
         font-weight: bold;
         color: #888;
-        padding-top: 10px;
+        padding-top: 5px;
     }
-    /* CENTERED TIME */
+    /* TIME */
     .game-time {
-        margin-top: 10px;
+        margin-top: 5px;
         font-weight: bold;
         color: #FF4B4B;
-        font-size: 1em;
+        font-size: 0.9em;
         border-top: 1px solid #41444e;
-        padding-top: 5px;
+        padding-top: 2px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -73,7 +73,7 @@ else:
     tab_home, tab_analytics, tab_fantasy = st.tabs(["🏠 Home", "📊 Data & Analytics", "⚔️ My Fantasy Team"])
 
     # ==========================================
-    # TAB 1: HOME (Schedule + Weekly Trends)
+    # TAB 1: HOME
     # ==========================================
     with tab_home:
         # --- SECTION A: TODAY'S SCHEDULE ---
@@ -84,14 +84,14 @@ else:
         if not schedule:
             st.info("No games scheduled for today.")
         else:
-            # Create rows of 3 games each
-            for i in range(0, len(schedule), 3):
-                cols = st.columns(3)
-                for j in range(3):
+            # CHANGE: 5 Games per row instead of 3 to align them horizontally
+            cols_per_row = 5
+            for i in range(0, len(schedule), cols_per_row):
+                cols = st.columns(cols_per_row)
+                for j in range(cols_per_row):
                     if i + j < len(schedule):
                         game = schedule[i+j]
                         with cols[j]:
-                            # REPLACED st.container with Custom HTML for styling control
                             st.markdown(f"""
                             <div class="game-card">
                                 <div class="team-row">
@@ -118,25 +118,19 @@ else:
             df_weekly = load_weekly_leaders()
         
         if not df_weekly.empty:
-            # Helper to make Horizontal, Small Charts
+            # Horizontal Charts (Halved Size ~200px)
             def make_mini_chart(data, x_col, y_col, color, title):
-                # Sort data descending
                 sorted_data = data.sort_values(y_col, ascending=False).head(5)
                 
-                # Horizontal Bar Chart
                 chart = alt.Chart(sorted_data).mark_bar(cornerRadiusEnd=4).encode(
-                    x=alt.X(f'{y_col}:Q', title=None), # The stat is on X axis (Horizontal)
-                    y=alt.Y(f'{x_col}:N', sort='-x', title=None), # Player name on Y axis
+                    x=alt.X(f'{y_col}:Q', title=None), 
+                    y=alt.Y(f'{x_col}:N', sort='-x', title=None), 
                     color=alt.value(color),
                     tooltip=[x_col, y_col]
                 )
                 
-                # Add Text Labels to end of bars
-                text = chart.mark_text(align='left', dx=2).encode(
-                    text=f'{y_col}:Q'
-                )
+                text = chart.mark_text(align='left', dx=2).encode(text=f'{y_col}:Q')
                 
-                # Set specific height (Halved size ~ 200px)
                 return (chart + text).properties(title=title, height=200)
 
             c1, c2 = st.columns(2)
@@ -162,7 +156,6 @@ else:
         st.header("📈 Breakout Detector")
         st.info("Select a player to see if they are heating up (Rolling 5-Game Average).")
 
-        # 1. Player Selector
         skater_options = df[df['PosType'] == 'Skater'].sort_values('Pts', ascending=False)
         player_dict = dict(zip(skater_options['Player'], skater_options['ID']))
         
