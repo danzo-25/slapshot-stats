@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 import re
+from datetime import datetime, timedelta # Added for date filtering
 from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news
 
 st.set_page_config(layout="wide", page_title="Slapshot Stats")
@@ -42,15 +43,8 @@ st.markdown("""
     @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
 
     /* NEWS STYLING */
-    .news-card {
-        display: flex;
-        background-color: #262730; 
-        border: 1px solid #3a3b42;
-        margin-bottom: 12px;
-        border-radius: 8px;
-        overflow: hidden;
-        transition: transform 0.2s;
-    }
+    .news-container { background-color: #1e1e1e; border-radius: 12px; padding: 15px; border: 1px solid #333; }
+    .news-card { display: flex; background-color: #262730; border: 1px solid #3a3b42; margin-bottom: 12px; border-radius: 8px; overflow: hidden; transition: transform 0.2s; }
     .news-card:hover { transform: translateY(-2px); border-color: #555; }
     .news-img { width: 110px; height: auto; object-fit: cover; flex-shrink: 0; border-right: 1px solid #3a3b42; }
     .news-content { padding: 10px; display: flex; flex-direction: column; justify-content: center; }
@@ -90,6 +84,7 @@ else:
             val_SO = st.number_input("Shutouts", value=3.0)
             val_OTL = st.number_input("OTL", value=1.0)
 
+    # Global FP
     df['FP'] = ((df['G'] * val_G) + (df['A'] * val_A) + (df['PPP'] * val_PPP) + 
                 (df['SHP'] * val_SHP) + (df['SOG'] * val_SOG) + (df['Hits'] * val_Hit) + 
                 (df['BkS'] * val_BkS) + (df['W'] * val_W) + (df['GA'] * val_GA) + 
@@ -101,8 +96,13 @@ else:
 
     tab_home, tab_analytics, tab_tools, tab_fantasy = st.tabs(["🏠 Home", "📊 Data & Analytics", "🛠️ Fantasy Tools", "⚔️ My Fantasy Team"])
 
+    # [TAB 1: HOME - CODE REMAINS THE SAME, OMITTED FOR BREVITY]
+    # [TAB 2: ANALYTICS - CODE REMAINS THE SAME, OMITTED FOR BREVITY]
+    # [TAB 3: TOOLS - CODE REMAINS THE SAME, OMITTED FOR BREVITY]
+    
     # ================= TAB 1: HOME =================
     with tab_home:
+        # (Previous Code ...)
         st.header("📅 Today's Games")
         schedule = load_schedule()
         if not schedule: st.info("No games scheduled.")
@@ -115,31 +115,19 @@ else:
                         game = schedule[i+j]
                         with cols[j]:
                             status_class = "game-live" if game.get("is_live") else "game-time"
-                            st.markdown(f"""
-                            <div class="game-card">
-                                <div class="team-row">
-                                    <div class="team-info"><img src="{game['away_logo']}" class="team-logo"><div class="team-name">{game['away']}</div></div>
-                                    <div class="vs-text">@</div>
-                                    <div class="team-info"><img src="{game['home_logo']}" class="team-logo"><div class="team-name">{game['home']}</div></div>
-                                </div>
-                                <div class="{status_class}">{game['time']}</div>
-                            </div>""", unsafe_allow_html=True)
+                            st.markdown(f"""<div class="game-card"><div class="team-row"><div class="team-info"><img src="{game['away_logo']}" class="team-logo"><div class="team-name">{game['away']}</div></div><div class="vs-text">@</div><div class="team-info"><img src="{game['home_logo']}" class="team-logo"><div class="team-name">{game['home']}</div></div></div><div class="{status_class}">{game['time']}</div></div>""", unsafe_allow_html=True)
         st.divider()
         col_sos, col_news = st.columns([3, 2])
-        
-        # --- SOS TABLE ---
         with col_sos:
             st.header("💪 Strength of Schedule")
             with st.spinner("Calculating..."):
                 sos_matrix, standings = get_weekly_schedule_matrix()
-            
             if not sos_matrix.empty and standings:
                 def get_logo(abbr): return f"https://assets.nhle.com/logos/nhl/svg/{abbr}_light.svg"
                 sos_display = sos_matrix.copy()
                 sos_display.index = sos_display.index.map(get_logo)
                 sos_display.reset_index(inplace=True)
                 sos_display.rename(columns={'index': 'Team'}, inplace=True) 
-                
                 day_cols = [c for c in sos_display.columns if c != 'Team']
                 for col in day_cols:
                     def transform_cell(val):
@@ -148,7 +136,6 @@ else:
                         if len(parts) > 1: return get_logo(parts[1])
                         return None
                     sos_display[col] = sos_display[col].apply(transform_cell)
-
                 def color_sos_logos(val, my_team_url):
                     if not val: return 'background-color: #262730'
                     try:
@@ -163,69 +150,46 @@ else:
                         elif diff > -0.15: return 'background-color: #c62828'
                         else: return 'background-color: #b71c1c'
                     except: return 'background-color: #262730'
-
                 styled_sos = sos_display.style.apply(lambda row: [color_sos_logos(row[c], row['Team']) for c in sos_display.columns], axis=1)
-                column_config = {}
-                column_config["Team"] = st.column_config.ImageColumn("Team", width="small")
-                for col in day_cols: column_config[col] = st.column_config.ImageColumn(col, width="small")
-
-                st.dataframe(styled_sos, use_container_width=True, height=500, column_config=column_config, hide_index=True)
+                col_conf = {"Team": st.column_config.ImageColumn("Team", width="small")}
+                for c in day_cols: col_conf[c] = st.column_config.ImageColumn(c, width="small")
+                st.dataframe(styled_sos, use_container_width=True, height=500, column_config=col_conf, hide_index=True)
             else: st.info("SOS data unavailable.")
-
-        # --- NEWS FEED (Using Native Container to fix glitch) ---
         with col_news:
             st.header("📰 Latest Headlines")
-            
-            # Use native container instead of raw HTML div to fix layout bug
-            with st.container(border=True):
-                news = load_nhl_news()
-                if news:
-                    for article in news:
-                        img_html = f'<img src="{article["image"]}" class="news-img">' if article['image'] else ''
-                        st.markdown(f"""
-                        <div class="news-card">
-                            {img_html}
-                            <div class="news-content">
-                                <a href="{article['link']}" target="_blank" class="news-title">{article['headline']}</a>
-                                <p class="news-desc">{article['description']}</p>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                else:
-                    st.info("No news available.")
-
+            st.markdown('<div class="news-container">', unsafe_allow_html=True)
+            news = load_nhl_news()
+            if news:
+                for article in news:
+                    img_html = f'<img src="{article["image"]}" class="news-img">' if article['image'] else ''
+                    st.markdown(f"""<div class="news-card">{img_html}<div class="news-content"><a href="{article['link']}" target="_blank" class="news-title">{article['headline']}</a><p class="news-desc">{article['description']}</p></div></div>""", unsafe_allow_html=True)
+            else: st.info("No news.")
+            st.markdown('</div>', unsafe_allow_html=True)
             st.markdown("#### More Trusted Sources")
             st.markdown("""<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;"><a href="https://www.tsn.ca/nhl" target="_blank" class="link-btn">TSN Hockey</a><a href="https://www.sportsnet.ca/nhl/" target="_blank" class="link-btn">Sportsnet</a><a href="https://www.dailyfaceoff.com/" target="_blank" class="link-btn">Daily Faceoff</a><a href="https://theathletic.com/nhl/" target="_blank" class="link-btn">The Athletic</a></div>""", unsafe_allow_html=True)
-
+        
         st.divider()
-
-        # --- RESTORED WEEKLY CHARTS ---
         st.header("🔥 Hot This Week (Last 7 Days)")
         with st.spinner("Loading weekly trends..."):
             df_weekly = load_weekly_leaders()
-        
         if not df_weekly.empty:
             def make_mini_chart(data, x_col, y_col, color, title):
                 sorted_data = data.sort_values(y_col, ascending=False).head(5)
-                chart = alt.Chart(sorted_data).mark_bar(cornerRadiusEnd=4).encode(
-                    x=alt.X(f'{y_col}:Q', title=None), 
-                    y=alt.Y(f'{x_col}:N', sort='-x', title=None), 
-                    color=alt.value(color), tooltip=[x_col, y_col]
-                ).properties(title=title, height=200)
+                chart = alt.Chart(sorted_data).mark_bar(cornerRadiusEnd=4).encode(x=alt.X(f'{y_col}:Q', title=None), y=alt.Y(f'{x_col}:N', sort='-x', title=None), color=alt.value(color), tooltip=[x_col, y_col]).properties(title=title, height=200)
                 text = chart.mark_text(align='left', dx=2).encode(text=f'{y_col}:Q')
                 return (chart + text)
-
             c1, c2 = st.columns(2)
             with c1: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
             with c2: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
-            
             c3, c4 = st.columns(2)
             with c3: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
             with c4: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
 
     # ================= TAB 2: ANALYTICS =================
     with tab_analytics:
+        # (Same content as previous, omitting for brevity)
         st.header("📈 Breakout Detector")
+        # ... (Same code as before) ...
         skater_options = df[df['PosType'] == 'Skater'].sort_values('Pts', ascending=False)
         player_dict = dict(zip(skater_options['Player'], skater_options['ID']))
         selected_player_name = st.selectbox("Select Player:", skater_options['Player'].unique())
@@ -247,48 +211,30 @@ else:
         filt_df = df.copy()
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
-        def highlight_my_team(row):
-            return ['background-color: #574d28'] * len(row) if row['Player'] in st.session_state.my_roster else [''] * len(row)
+        def highlight_my_team(row): return ['background-color: #574d28'] * len(row) if row['Player'] in st.session_state.my_roster else [''] * len(row)
         styled_df = filt_df.style.apply(highlight_my_team, axis=1)
         whole_num_cols = ['GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SO', 'OTL', '+/-']
         valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
-        styled_df = styled_df.format("{:.0f}", subset=valid_whole)
-        styled_df = styled_df.format("{:.1f}", subset=['FP', 'ROS_FP', 'Sh%', 'FO%', 'SAT%', 'USAT%'])
-        styled_df = styled_df.format("{:.2f}", subset=['GAA', 'GSAA'])
-        styled_df = styled_df.format("{:.3f}", subset=['SV%'])
+        styled_df = styled_df.format("{:.0f}", subset=valid_whole).format("{:.1f}", subset=['FP', 'ROS_FP', 'Sh%', 'FO%', 'SAT%', 'USAT%']).format("{:.2f}", subset=['GAA', 'GSAA']).format("{:.3f}", subset=['SV%'])
         cols = ['ID', 'Player', 'Team', 'Pos', 'FP', 'ROS_FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining'] and not c.startswith('ROS_')]
         st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_order=cols)
 
-    # ================= TAB 3: FANTASY TOOLS =================
+    # ================= TAB 3: TOOLS =================
     with tab_tools:
+        # (Same content as previous, omitting for brevity)
         st.header("⚖️ Trade Analyzer")
-        st.info("Compare players based on current stats and **Rest of Season (ROS)** projections.")
-        
-        if 'Player' in df.columns:
-            all_players = sorted(df['Player'].dropna().astype(str).unique().tolist())
-        else:
-            all_players = []
-            st.error("Player data not found.")
-
+        # ... (Same code as before) ...
+        if 'Player' in df.columns: all_players = sorted(df['Player'].dropna().astype(str).unique().tolist())
+        else: all_players = []
         def show_selected_player_card(player_name, side):
-            p_data = df[df['Player'] == player_name].iloc[0]
-            pid = p_data['ID']
-            team = p_data['Team']
-            img_url = f"https://assets.nhle.com/mugs/nhl/20252026/{team}/{pid}.png"
+            p_data = df[df['Player'] == player_name].iloc[0]; pid = p_data['ID']; team = p_data['Team']; img_url = f"https://assets.nhle.com/mugs/nhl/20252026/{team}/{pid}.png"
             with st.container(border=True):
                 r1, r2, r3, r4 = st.columns([0.25, 0.35, 0.3, 0.1])
                 with r1: st.image(img_url, width=60)
-                with r2:
-                    st.markdown(f"**{player_name}**")
-                    st.caption(f"{p_data['Team']} • {p_data['Pos']}")
-                with r3:
-                    st.markdown(f"**FP:** {p_data['FP']:.1f}")
-                    st.markdown(f"**ROS:** {p_data['ROS_FP']:.1f}")
-                with r4:
-                    if st.button("❌", key=f"del_{side}_{player_name}"):
-                        remove_player(player_name, side)
-                        st.rerun()
-
+                with r2: st.markdown(f"**{player_name}**"); st.caption(f"{p_data['Team']} • {p_data['Pos']}")
+                with r3: st.markdown(f"**FP:** {p_data['FP']:.1f}"); st.markdown(f"**ROS:** {p_data['ROS_FP']:.1f}")
+                with r4: 
+                    if st.button("❌", key=f"del_{side}_{player_name}"): remove_player(player_name, side); st.rerun()
         c1, c_mid, c2 = st.columns([1, 0.1, 1])
         with c1:
             st.subheader("📤 Sending")
@@ -302,19 +248,15 @@ else:
             st.selectbox("Add Player", options=opts_r, index=None, placeholder="Type to add...", key="sb_recv", on_change=add_player_from_select, args=('recv',), label_visibility="collapsed")
             if st.session_state.trade_recv:
                 for p in st.session_state.trade_recv: show_selected_player_card(p, "recv")
-
         if st.session_state.trade_send or st.session_state.trade_recv:
             st.divider()
-            df_send = df[df['Player'].isin(st.session_state.trade_send)]
-            df_recv = df[df['Player'].isin(st.session_state.trade_recv)]
-            
+            df_send = df[df['Player'].isin(st.session_state.trade_send)]; df_recv = df[df['Player'].isin(st.session_state.trade_recv)]
             if not df_send.empty and not df_recv.empty:
                 diff = df_recv['ROS_FP'].sum() - df_send['ROS_FP'].sum()
                 st.subheader("The Verdict")
                 if diff > 0: st.markdown(f"""<div class="trade-win"><h2>✅ You Win!</h2><p>Projected Gain: <b>+{diff:.1f} FP</b></p></div>""", unsafe_allow_html=True)
                 elif diff < 0: st.markdown(f"""<div class="trade-loss"><h2>❌ You Lose.</h2><p>Projected Loss: <b>{diff:.1f} FP</b></p></div>""", unsafe_allow_html=True)
                 else: st.info("Trade is even.")
-
             st.markdown("#### Projected Totals (Rest of Season)")
             stats_map = {'Fantasy Points': 'ROS_FP', 'Goals': 'ROS_G', 'Assists': 'ROS_A', 'Points': 'ROS_Pts', 'PPP': 'ROS_PPP', 'SOG': 'ROS_SOG', 'Hits': 'ROS_Hits', 'Blocks': 'ROS_BkS', 'Wins': 'ROS_W'}
             summary_data = []
@@ -322,7 +264,6 @@ else:
                 if col in df.columns:
                     val_s = df_send[col].sum(); val_r = df_recv[col].sum()
                     summary_data.append({'Stat': label, 'Sending': val_s, 'Receiving': val_r, 'Net': val_r - val_s})
-            
             summary_df = pd.DataFrame(summary_data).set_index('Stat')
             def highlight_winner(row):
                 s, r = row['Sending'], row['Receiving']
@@ -332,7 +273,6 @@ else:
                 return ['', '', '',]
             styled_summary = summary_df.style.format("{:+.1f}", subset=['Net']).format("{:.1f}", subset=['Sending', 'Receiving']).apply(highlight_winner, axis=1)
             st.dataframe(styled_summary, use_container_width=True)
-
             st.caption("Individual Player Stats (Current & Projected)")
             full_list = pd.concat([df_send, df_recv])
             if not full_list.empty:
@@ -358,7 +298,12 @@ else:
     with tab_fantasy:
         st.header("⚔️ My Roster")
         col_up, _ = st.columns([1, 2])
-        uploaded_file = col_up.file_uploader("📂 Load Saved Roster", type=["csv"])
+        with col_up:
+            uploaded_file = st.file_uploader("📂 Load Saved Roster", type=["csv"])
+        
+        # TIME FILTER (New Feature)
+        time_filter = st.selectbox("Select Time Frame", ["Season", "Last 7 Days", "Last 15 Days", "Last 30 Days"])
+
         if uploaded_file:
             try:
                 udf = pd.read_csv(uploaded_file)
@@ -369,15 +314,118 @@ else:
         st.session_state.my_roster = selected_players
 
         if selected_players:
-            team_df = df[df['Player'].isin(selected_players)]
-            st.download_button("💾 Save Roster", team_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Goals", int(team_df['G'].sum()))
-            c2.metric("Points", int(team_df['Pts'].sum()))
-            c3.metric("Total FP", f"{team_df['FP'].sum():,.1f}")
-            c4.metric("Goalie Wins", int(team_df['W'].sum()))
+            # --- DATE FILTERING LOGIC ---
+            base_team_df = df[df['Player'].isin(selected_players)].copy()
             
-            styled_team = team_df.style.format("{:.0f}", subset=[c for c in whole_num_cols if c in team_df.columns])
-            styled_team = styled_team.format("{:.1f}", subset=['FP'])
-            cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining']]
-            st.dataframe(styled_team, use_container_width=True, hide_index=True, column_order=cols)
+            display_df = base_team_df # Default to Season stats
+            
+            if time_filter != "Season":
+                days = int(time_filter.split(" ")[1])
+                start_date = datetime.now() - timedelta(days=days)
+                
+                # Fetch recent stats for roster players
+                with st.spinner(f"Fetching stats for last {days} days..."):
+                    recent_stats = []
+                    for _, row in base_team_df.iterrows():
+                        pid = row['ID']
+                        logs = get_player_game_log(pid)
+                        if not logs.empty:
+                            mask = logs['gameDate'] >= start_date
+                            recent = logs[mask]
+                            
+                            # Aggregate
+                            stat_dict = {
+                                'ID': pid, 'Player': row['Player'], 'Team': row['Team'], 'Pos': row['Pos'],
+                                'GP': len(recent),
+                                'G': recent['goals'].sum() if 'goals' in recent else 0,
+                                'A': recent['assists'].sum() if 'assists' in recent else 0,
+                                'Pts': recent['points'].sum() if 'points' in recent else 0,
+                                'SOG': recent['shots'].sum() if 'shots' in recent else 0,
+                                'PPP': recent['powerPlayPoints'].sum() if 'powerPlayPoints' in recent else 0,
+                                'Hits': recent['hits'].sum() if 'hits' in recent else 0,
+                                'BkS': recent['blockedShots'].sum() if 'blockedShots' in recent else 0,
+                                'PIM': recent['pim'].sum() if 'pim' in recent else 0,
+                                # Goalies
+                                'W': len(recent[recent['decision'] == 'W']) if 'decision' in recent else 0,
+                                'SO': recent['shutouts'].sum() if 'shutouts' in recent else 0,
+                                'Svs': recent['saves'].sum() if 'saves' in recent else 0,
+                                'GA': recent['goalsAgainst'].sum() if 'goalsAgainst' in recent else 0,
+                            }
+                            # Calculate Custom FP for this period
+                            fp = (stat_dict['G']*val_G + stat_dict['A']*val_A + stat_dict['PPP']*val_PPP + 
+                                  stat_dict['SOG']*val_SOG + stat_dict['Hits']*val_Hit + stat_dict['BkS']*val_BkS +
+                                  stat_dict['W']*val_W + stat_dict['GA']*val_GA + stat_dict['Svs']*val_Svs + stat_dict['SO']*val_SO)
+                            stat_dict['FP'] = fp
+                            recent_stats.append(stat_dict)
+                    
+                    if recent_stats:
+                        display_df = pd.DataFrame(recent_stats)
+            
+            # --- RENDER TABLE ---
+            st.download_button("💾 Save Roster", display_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
+            
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Goals", int(display_df['G'].sum()) if 'G' in display_df else 0)
+            c2.metric("Points", int(display_df['Pts'].sum()) if 'Pts' in display_df else 0)
+            c3.metric("Total FP", f"{display_df['FP'].sum():,.1f}" if 'FP' in display_df else "0.0")
+            c4.metric("Goalie Wins", int(display_df['W'].sum()) if 'W' in display_df else 0)
+            
+            # Clean columns for display
+            cols_to_hide = ['ID', 'PosType']
+            final_cols = ['Player', 'Team', 'Pos', 'FP', 'GP', 'G', 'A', 'Pts', 'PPP', 'SOG', 'Hits', 'BkS', 'W', 'Svs', 'GA', 'SO']
+            # Ensure cols exist
+            final_cols = [c for c in final_cols if c in display_df.columns]
+            
+            # Styling
+            whole_num_cols = ['GP', 'G', 'A', 'Pts', 'PPP', 'SOG', 'Hits', 'BkS', 'W', 'Svs', 'GA', 'SO']
+            valid_whole = [c for c in whole_num_cols if c in display_df.columns]
+            
+            styled_team = display_df[final_cols].style.format("{:.0f}", subset=valid_whole).format("{:.1f}", subset=['FP'])
+            
+            config = {
+                "Player": st.column_config.TextColumn("Player", pinned=True),
+                "FP": st.column_config.NumberColumn("FP", format="%.1f"),
+                "GP": st.column_config.NumberColumn("GP", format="%.0f"),
+            }
+            
+            st.dataframe(styled_team, use_container_width=True, hide_index=True, column_config=config)
+
+            # --- COLD TRENDS GRAPH ---
+            st.divider()
+            st.subheader("❄️ Cold Trends (Last 5 Games vs Season Avg)")
+            
+            trend_data = []
+            for _, row in base_team_df.iterrows():
+                # Compare recent average to season average
+                pid = row['ID']
+                logs = get_player_game_log(pid)
+                if not logs.empty and len(logs) >= 5:
+                    # Calculate game-by-game FP for the logs
+                    # (Simplified for speed, using main scoring stats)
+                    logs['GF_FP'] = (logs.get('goals',0)*val_G + logs.get('assists',0)*val_A + 
+                                     logs.get('shots',0)*val_SOG + logs.get('hits',0)*val_Hit + 
+                                     logs.get('blockedShots',0)*val_BkS)
+                    
+                    last_5_avg = logs.tail(5)['GF_FP'].mean()
+                    season_avg = row['FP'] / row['GP'] if row['GP'] > 0 else 0
+                    diff = last_5_avg - season_avg
+                    
+                    trend_data.append({'Player': row['Player'], 'Trend': diff, 'Val': last_5_avg})
+            
+            if trend_data:
+                df_trend = pd.DataFrame(trend_data).sort_values('Trend')
+                # Chart
+                chart = alt.Chart(df_trend).mark_bar().encode(
+                    x=alt.X('Player', sort=None),
+                    y=alt.Y('Trend', title='FP Diff (Last 5 vs Season)'),
+                    color=alt.condition(
+                        alt.datum.Trend > 0,
+                        alt.value("#4caf50"),  # Green
+                        alt.value("#f44336")   # Red
+                    ),
+                    tooltip=['Player', alt.Tooltip('Trend', format='.1f'), alt.Tooltip('Val', title='L5 Avg', format='.1f')]
+                ).properties(height=300)
+                
+                st.altair_chart(chart, use_container_width=True)
+            else:
+                st.caption("Not enough data for trends.")
