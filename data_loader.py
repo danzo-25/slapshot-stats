@@ -42,11 +42,12 @@ def load_nhl_data():
     df_adv = fetch_data("skater", "puckPossession", "satPct")
 
     if not df_sum.empty:
-        # 1. RENAME SKATERS IMMEDIATELY so they match Goalies later
+        # 1. RENAME SKATERS IMMEDIATELY
         rename_skaters = {
             'playerId': 'ID', 'skaterFullName': 'Player', 'teamAbbrevs': 'Team', 'positionCode': 'Pos',
             'gamesPlayed': 'GP', 'goals': 'G', 'assists': 'A', 'points': 'Pts',
             'plusMinus': '+/-', 'penaltyMinutes': 'PIM', 'ppPoints': 'PPP', 
+            'shPoints': 'SHP',  # <--- NEW: Shorthanded Points
             'gameWinningGoals': 'GWG', 'shots': 'SOG', 'shootingPct': 'Sh%', 
             'faceoffWinPct': 'FO%', 'timeOnIcePerGame': 'TOI'
         }
@@ -75,8 +76,8 @@ def load_nhl_data():
             'goalieFullName': 'Player', 'playerId': 'ID', 'teamAbbrevs': 'Team',
             'gamesPlayed': 'GP', 'wins': 'W', 'losses': 'L', 'otLosses': 'OTL',
             'goalsAgainstAverage': 'GAA', 'savePct': 'SV%', 'shutouts': 'SO',
-            'shotsAgainst': 'SA', 'saves': 'Svs',
-            # Goalies also have G/A/Pts
+            'shotsAgainst': 'SA', 'saves': 'Svs', 
+            'goalsAgainst': 'GA', # <--- NEW: Goals Against (Raw count)
             'goals': 'G', 'assists': 'A', 'points': 'Pts', 'penaltyMinutes': 'PIM', 'timeOnIcePerGame': 'TOI'
         })
         
@@ -91,7 +92,6 @@ def load_nhl_data():
             df_goalies['GSAA'] = 0
 
     # ================= COMBINE =================
-    # Now both DataFrames have 'G', 'A', 'Pts', 'Team', etc. No duplicates will be created.
     if df_sum.empty and df_goalies.empty: return pd.DataFrame()
     elif df_sum.empty: df_combined = df_goalies
     elif df_goalies.empty: df_combined = df_sum
@@ -105,9 +105,9 @@ def load_nhl_data():
     df_combined['Player'] = df_combined['Player'].fillna('Unknown')
     
     # Fill Numeric
-    numeric_cols = ['GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'GWG', 'SOG', 'Sh%', 'FO%', 
+    numeric_cols = ['GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'SHP', 'GWG', 'SOG', 'Sh%', 'FO%', 
                     'Hits', 'BkS', 'SAT%', 'USAT%', 
-                    'W', 'L', 'OTL', 'GAA', 'SV%', 'SO', 'GSAA']
+                    'W', 'L', 'OTL', 'GAA', 'SV%', 'SO', 'GSAA', 'GA', 'Svs']
     
     for col in numeric_cols:
         if col not in df_combined.columns: df_combined[col] = 0
@@ -167,10 +167,7 @@ def load_weekly_leaders():
     """Fetches top performers for the last 7 days using API Aggregation."""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=7)
-    
     clean_date_filter = f"gameTypeId=2 and gameDate >= '{start_date.strftime('%Y-%m-%d')}' and gameDate <= '{end_date.strftime('%Y-%m-%d')}'"
-    
-    # Use summary endpoint for weekly charts
     df = fetch_data("skater", "summary", "points", override_cayenne=clean_date_filter, aggregate=True)
     
     if df.empty: return pd.DataFrame()
