@@ -1,228 +1,319 @@
-import requests
-import pandas as pd
 import streamlit as st
-from datetime import datetime, timedelta
-import pytz
+import pandas as pd
+import altair as alt
+from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news
 
-# --- GENERIC FETCHER ---
-def fetch_data(endpoint, report_type, sort_key, override_cayenne=None, aggregate=False):
-    url = f"https://api.nhle.com/stats/rest/en/{endpoint}/{report_type}"
+st.set_page_config(layout="wide", page_title="Slapshot Stats")
+st.title("🏒 Slapshot Stats")
+
+# --- SESSION STATE ---
+if 'my_roster' not in st.session_state: st.session_state.my_roster = []
+if "trade_send" not in st.session_state: st.session_state.trade_send = []
+if "trade_recv" not in st.session_state: st.session_state.trade_recv = []
+
+# --- CALLBACKS ---
+def add_player_from_select(side):
+    """Adds player from selectbox and clears it."""
+    key = "sb_send" if side == 'send' else "sb_recv"
+    player = st.session_state.get(key)
     
-    # FORCE 2025-2026 SEASON
-    if override_cayenne:
-        cayenne_exp = override_cayenne
-    else:
-        # Explicitly set to 2025-2026
-        cayenne_exp = "seasonId=20252026 and gameTypeId=2"
-
-    params = {
-        "isAggregate": "true" if aggregate else "false",
-        "isGame": "false",
-        "sort": f'[{{"property":"{sort_key}","direction":"DESC"}}]',
-        "start": 0,
-        "limit": -1,
-        "cayenneExp": cayenne_exp
-    }
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        return pd.DataFrame(data.get("data", []))
-    except Exception as e:
-        return pd.DataFrame()
-
-# --- MAIN DATA LOADER (CACHED) ---
-@st.cache_data(ttl=3600)
-def load_nhl_data():
-    # 1. Skaters
-    df_sum = fetch_data("skater", "summary", "points")
-    df_real = fetch_data("skater", "realtime", "hits")
-    df_adv = fetch_data("skater", "puckPossession", "satPct")
-
-    if not df_sum.empty:
-        rename_skaters = {
-            'playerId': 'ID', 'skaterFullName': 'Player', 'teamAbbrevs': 'Team', 'positionCode': 'Pos',
-            'gamesPlayed': 'GP', 'goals': 'G', 'assists': 'A', 'points': 'Pts',
-            'plusMinus': '+/-', 'penaltyMinutes': 'PIM', 'ppPoints': 'PPP', 
-            'shPoints': 'SHP', 'gameWinningGoals': 'GWG', 'shots': 'SOG', 'shootingPct': 'Sh%', 
-            'faceoffWinPct': 'FO%', 'timeOnIcePerGame': 'TOI'
-        }
-        df_sum = df_sum.rename(columns=rename_skaters)
+    if player:
+        target = st.session_state.trade_send if side == 'send' else st.session_state.trade_recv
+        other = st.session_state.trade_recv if side == 'send' else st.session_state.trade_send
         
-        if not df_real.empty:
-            df_real = df_real[['playerId', 'hits', 'blockedShots']].rename(columns={'playerId': 'ID', 'hits': 'Hits', 'blockedShots': 'BkS'})
-            df_sum = df_sum.merge(df_real, on='ID', how='left')
-
-        if not df_adv.empty:
-            df_adv = df_adv[['playerId', 'satPct', 'usatPct']].rename(columns={'playerId': 'ID', 'satPct': 'SAT%', 'usatPct': 'USAT%'})
-            df_sum = df_sum.merge(df_adv, on='ID', how='left')
+        if player not in target and player not in other:
+            target.append(player)
         
-        df_sum['PosType'] = 'Skater'
+        st.session_state[key] = None
 
-    # 2. Goalies
-    df_goalies = fetch_data("goalie", "summary", "wins")
-    if not df_goalies.empty:
-        df_goalies['PosType'] = 'Goalie'
-        df_goalies['Pos'] = 'G'
-        df_goalies = df_goalies.rename(columns={
-            'goalieFullName': 'Player', 'playerId': 'ID', 'teamAbbrevs': 'Team',
-            'gamesPlayed': 'GP', 'wins': 'W', 'losses': 'L', 'otLosses': 'OTL',
-            'goalsAgainstAverage': 'GAA', 'savePct': 'SV%', 'shutouts': 'SO',
-            'shotsAgainst': 'SA', 'saves': 'Svs', 'goalsAgainst': 'GA',
-            'goals': 'G', 'assists': 'A', 'points': 'Pts', 'penaltyMinutes': 'PIM', 'timeOnIcePerGame': 'TOI'
-        })
-        
-        # GSAA Calc
-        total_shots = df_goalies['SA'].sum()
-        total_saves = df_goalies['Svs'].sum()
-        if total_shots > 0:
-            league_avg_sv = total_saves / total_shots
-            df_goalies['GSAA'] = df_goalies['Svs'] - (df_goalies['SA'] * league_avg_sv)
-            df_goalies['GSAA'] = df_goalies['GSAA'].round(2)
+def remove_player(player, side):
+    target = st.session_state.trade_send if side == 'send' else st.session_state.trade_recv
+    if player in target:
+        target.remove(player)
+
+# --- CSS ---
+st.markdown("""
+<style>
+    .game-card { background-color: #262730; border: 1px solid #41444e; border-radius: 8px; padding: 5px; text-align: center; margin: 0 auto 5px auto; max-width: 100%; box-shadow: 1px 1px 3px rgba(0,0,0,0.2); }
+    .team-row { display: flex; justify-content: center; align-items: center; gap: 5px; }
+    .team-info { display: flex; flex-direction: column; align-items: center; }
+    .team-logo { width: 55px; height: 55px; object-fit: contain; margin-bottom: 2px; }
+    .team-name { font-weight: 900; font-size: 1em; margin-top: -2px; }
+    .vs-text { font-size: 1em; font-weight: bold; color: #888; padding-top: 5px; }
+    .game-time { margin-top: 5px; font-weight: bold; color: #FF4B4B; font-size: 0.9em; border-top: 1px solid #41444e; padding-top: 2px; }
+    .news-card { background-color: #1e1e1e; border-left: 4px solid #0083b8; padding: 10px; margin-bottom: 10px; border-radius: 4px; }
+    .news-title { font-weight: bold; font-size: 1.05em; color: #fff; text-decoration: none; }
+    .news-desc { font-size: 0.9em; color: #ccc; margin-top: 5px; }
+    .trade-win { background-color: rgba(76, 175, 80, 0.15); border: 2px solid #4caf50; padding: 15px; border-radius: 8px; text-align: center; }
+    .trade-loss { background-color: rgba(244, 67, 54, 0.15); border: 2px solid #f44336; padding: 15px; border-radius: 8px; text-align: center; }
+</style>
+""", unsafe_allow_html=True)
+
+with st.spinner('Loading NHL Data...'):
+    df = load_nhl_data()
+
+if df.empty:
+    st.warning("No data found. API might be down.")
+else:
+    # --- SIDEBAR ---
+    with st.sidebar:
+        st.header("⚙️ League Settings")
+        with st.expander("Fantasy Scoring (FP)", expanded=False):
+            val_G = st.number_input("Goals", value=2.0)
+            val_A = st.number_input("Assists", value=1.0)
+            val_PPP = st.number_input("PPP", value=0.5)
+            val_SHP = st.number_input("SHP", value=0.5)
+            val_SOG = st.number_input("SOG", value=0.1)
+            val_Hit = st.number_input("Hits", value=0.1)
+            val_BkS = st.number_input("Blocks", value=0.5)
+            val_W = st.number_input("Wins", value=4.0)
+            val_GA = st.number_input("GA", value=-2.0)
+            val_Svs = st.number_input("Saves", value=0.2)
+            val_SO = st.number_input("Shutouts", value=3.0)
+            val_OTL = st.number_input("OTL", value=1.0)
+
+    # --- GLOBAL CALC ---
+    df['FP'] = ((df['G'] * val_G) + (df['A'] * val_A) + (df['PPP'] * val_PPP) + 
+                (df['SHP'] * val_SHP) + (df['SOG'] * val_SOG) + (df['Hits'] * val_Hit) + 
+                (df['BkS'] * val_BkS) + (df['W'] * val_W) + (df['GA'] * val_GA) + 
+                (df['Svs'] * val_Svs) + (df['SO'] * val_SO) + (df['OTL'] * val_OTL)).round(1)
+    df['GamesRemaining'] = 82 - df['GP']
+    def calc_ros(col): return (df[col] / df['GP']).fillna(0) * df['GamesRemaining']
+    for s in ['G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'FP', 'W', 'Svs', 'SO']:
+        if s in df.columns: df[f'ROS_{s}'] = calc_ros(s)
+
+    tab_home, tab_analytics, tab_tools, tab_fantasy = st.tabs(["🏠 Home", "📊 Data & Analytics", "🛠️ Fantasy Tools", "⚔️ My Fantasy Team"])
+
+    # ================= TAB 1: HOME =================
+    with tab_home:
+        st.header("📅 Today's Games")
+        schedule = load_schedule()
+        if not schedule: st.info("No games scheduled.")
         else:
-            df_goalies['GSAA'] = 0
+            cols_per_row = 5
+            for i in range(0, len(schedule), cols_per_row):
+                cols = st.columns(cols_per_row)
+                for j in range(cols_per_row):
+                    if i + j < len(schedule):
+                        game = schedule[i+j]
+                        with cols[j]:
+                            st.markdown(f"""
+                            <div class="game-card">
+                                <div class="team-row">
+                                    <div class="team-info"><img src="{game['away_logo']}" class="team-logo"><div class="team-name">{game['away']}</div></div>
+                                    <div class="vs-text">@</div>
+                                    <div class="team-info"><img src="{game['home_logo']}" class="team-logo"><div class="team-name">{game['home']}</div></div>
+                                </div>
+                                <div class="game-time">{game['time']}</div>
+                            </div>""", unsafe_allow_html=True)
+        st.divider()
+        col_sos, col_news = st.columns([2, 1])
+        with col_sos:
+            st.header("💪 Strength of Schedule")
+            with st.spinner("Calculating..."):
+                sos_matrix, standings = get_weekly_schedule_matrix()
+            if not sos_matrix.empty and standings:
+                def color_sos(val, my_team_abbr):
+                    if not val or val == "": return 'background-color: #262730'
+                    opp_abbr = val.split(" ")[1] 
+                    my_str = standings.get(my_team_abbr, 0.5); opp_str = standings.get(opp_abbr, 0.5)
+                    diff = my_str - opp_str
+                    if diff > 0.15: return 'background-color: #1b5e20; color: white'
+                    elif diff > 0.05: return 'background-color: #2e7d32; color: white'
+                    elif diff > 0.00: return 'background-color: #4caf50; color: black'
+                    elif diff > -0.05: return 'background-color: #fbc02d; color: black'
+                    elif diff > -0.15: return 'background-color: #c62828; color: white'
+                    else: return 'background-color: #b71c1c; color: white'
+                styled_sos = sos_matrix.style.apply(lambda row: [color_sos(val, row.name) for val in row], axis=1).set_properties(**{'text-align': 'center'})
+                st.dataframe(styled_sos, use_container_width=False, height=500, width=800)
+            else: st.info("SOS data unavailable.")
+        with col_news:
+            st.header("📰 Latest News")
+            news = load_nhl_news()
+            if news:
+                for article in news:
+                    st.markdown(f"""<div class="news-card"><a href="{article['link']}" target="_blank" class="news-title">{article['headline']}</a><div class="news-desc">{article['description']}</div></div>""", unsafe_allow_html=True)
+            else: st.info("No news.")
 
-    if df_sum.empty and df_goalies.empty: return pd.DataFrame()
-    elif df_sum.empty: df_combined = df_goalies
-    elif df_goalies.empty: df_combined = df_sum
-    else: df_combined = pd.concat([df_sum, df_goalies], ignore_index=True)
+    # ================= TAB 2: ANALYTICS =================
+    with tab_analytics:
+        st.header("📈 Breakout Detector")
+        skater_options = df[df['PosType'] == 'Skater'].sort_values('Pts', ascending=False)
+        player_dict = dict(zip(skater_options['Player'], skater_options['ID']))
+        selected_player_name = st.selectbox("Select Player:", skater_options['Player'].unique())
+        if selected_player_name:
+            pid = player_dict[selected_player_name]
+            game_log = get_player_game_log(pid)
+            if not game_log.empty:
+                game_log['Rolling Points'] = game_log['points'].rolling(window=5, min_periods=1).mean()
+                chart_data = game_log[['gameDate', 'points', 'Rolling Points']].set_index('gameDate')
+                st.line_chart(chart_data, color=["#d3d3d3", "#ff4b4b"])
+        st.divider()
+        st.subheader("League Summary")
+        with st.expander("Filter Options"):
+            c1, c2 = st.columns(2)
+            teams = sorted(df['Team'].unique())
+            sel_teams = c1.multiselect("Team", teams, default=teams)
+            pos = sorted(df['Pos'].unique())
+            sel_pos = c2.multiselect("Position", pos, default=pos)
+        filt_df = df.copy()
+        if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
+        if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
+        def highlight_my_team(row):
+            return ['background-color: #574d28'] * len(row) if row['Player'] in st.session_state.my_roster else [''] * len(row)
+        styled_df = filt_df.style.apply(highlight_my_team, axis=1)
+        whole_num_cols = ['GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SO', 'OTL', '+/-']
+        valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
+        styled_df = styled_df.format("{:.0f}", subset=valid_whole)
+        styled_df = styled_df.format("{:.1f}", subset=['FP', 'ROS_FP', 'Sh%', 'FO%', 'SAT%', 'USAT%'])
+        styled_df = styled_df.format("{:.2f}", subset=['GAA', 'GSAA'])
+        styled_df = styled_df.format("{:.3f}", subset=['SV%'])
+        cols = ['ID', 'Player', 'Team', 'Pos', 'FP', 'ROS_FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining'] and not c.startswith('ROS_')]
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_order=cols)
 
-    # Clean Data
-    if 'Team' in df_combined.columns:
-        df_combined['Team'] = df_combined['Team'].apply(lambda x: x.split(',')[-1].strip() if isinstance(x, str) else 'N/A')
-    else: df_combined['Team'] = 'N/A'
-    
-    df_combined['Player'] = df_combined['Player'].fillna('Unknown')
-    
-    numeric_cols = ['GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'SHP', 'GWG', 'SOG', 'Sh%', 'FO%', 
-                    'Hits', 'BkS', 'SAT%', 'USAT%', 'W', 'L', 'OTL', 'GAA', 'SV%', 'SO', 'GSAA', 'GA', 'Svs']
-    
-    for col in numeric_cols:
-        if col not in df_combined.columns: df_combined[col] = 0
-        df_combined[col] = pd.to_numeric(df_combined[col], errors='coerce').fillna(0)
-
-    cols_to_keep = ['ID', 'Player', 'Team', 'Pos', 'PosType'] + numeric_cols + ['TOI']
-    final_cols = [c for c in cols_to_keep if c in df_combined.columns]
-    
-    return df_combined[final_cols]
-
-@st.cache_data(ttl=3600)
-def get_player_game_log(player_id):
-    # Using NHL V1 API for game logs
-    url = f"https://api-web.nhle.com/v1/player/{player_id}/game-log/20252026/2"
-    try:
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        data = response.json()
-        games = data.get("gameLog", [])
-        if not games: return pd.DataFrame()
-        df_log = pd.DataFrame(games)
-        df_log['gameDate'] = pd.to_datetime(df_log['gameDate'])
-        return df_log.sort_values(by='gameDate')
-    except: return pd.DataFrame()
-
-@st.cache_data(ttl=3600)
-def load_schedule():
-    url = "https://api-web.nhle.com/v1/schedule/now"
-    try:
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        data = response.json()
-        today_str = datetime.now().strftime("%Y-%m-%d")
+    # ================= TAB 3: FANTASY TOOLS (FIXED TABLE) =================
+    with tab_tools:
+        st.header("⚖️ Trade Analyzer")
+        st.info("Compare players based on current stats and **Rest of Season (ROS)** projections.")
         
-        todays_games = []
-        for day in data.get('gameWeek', []):
-            if day['date'] == today_str:
-                todays_games = day.get('games', [])
-                break
-        
-        processed_games = []
-        for g in todays_games:
-            utc_time = datetime.strptime(g['startTimeUTC'], "%Y-%m-%dT%H:%M:%SZ")
-            utc_time = utc_time.replace(tzinfo=pytz.utc)
-            est_time = utc_time.astimezone(pytz.timezone('US/Eastern'))
-            processed_games.append({
-                "home": g['homeTeam']['abbrev'],
-                "home_logo": g['homeTeam'].get('logo', ''),
-                "away": g['awayTeam']['abbrev'],
-                "away_logo": g['awayTeam'].get('logo', ''),
-                "time": est_time.strftime("%I:%M %p EST")
-            })
-        return processed_games
-    except: return []
+        all_players = sorted(df['Player'].unique().tolist())
+        c1, c_mid, c2 = st.columns([1, 0.1, 1])
 
-@st.cache_data(ttl=3600)
-def load_weekly_leaders():
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=7)
-    clean_date_filter = f"gameTypeId=2 and gameDate >= '{start_date.strftime('%Y-%m-%d')}' and gameDate <= '{end_date.strftime('%Y-%m-%d')}'"
-    df = fetch_data("skater", "summary", "points", override_cayenne=clean_date_filter, aggregate=True)
-    if df.empty: return pd.DataFrame()
-    rename_map = {'skaterFullName': 'Player', 'teamAbbrevs': 'Team', 'positionCode': 'Pos', 'goals': 'G', 'assists': 'A', 'points': 'Pts', 'shots': 'SOG', 'ppPoints': 'PPP'}
-    df = df.rename(columns=rename_map)
-    return df
+        # --- SENDING ---
+        with c1:
+            st.subheader("📤 Sending")
+            opts_s = [p for p in all_players if p not in st.session_state.trade_recv]
+            st.selectbox(
+                "Add Player", 
+                options=opts_s, 
+                index=None, 
+                placeholder="Type to add player...", 
+                key="sb_send", 
+                on_change=add_player_from_select, 
+                args=('send',),
+                label_visibility="collapsed"
+            )
+            if st.session_state.trade_send:
+                st.markdown("---")
+                for p in st.session_state.trade_send:
+                    c_txt, c_btn = st.columns([0.8, 0.2])
+                    c_txt.write(f"**{p}**")
+                    c_btn.button("❌", key=f"del_s_{p}", on_click=remove_player, args=(p, 'send'))
 
-@st.cache_data(ttl=3600)
-def get_weekly_schedule_matrix():
-    return _get_weekly_schedule_matrix_impl()
+        # --- RECEIVING ---
+        with c2:
+            st.subheader("📥 Receiving")
+            opts_r = [p for p in all_players if p not in st.session_state.trade_send]
+            st.selectbox(
+                "Add Player", 
+                options=opts_r, 
+                index=None, 
+                placeholder="Type to add player...", 
+                key="sb_recv", 
+                on_change=add_player_from_select, 
+                args=('recv',),
+                label_visibility="collapsed"
+            )
+            if st.session_state.trade_recv:
+                st.markdown("---")
+                for p in st.session_state.trade_recv:
+                    c_txt, c_btn = st.columns([0.8, 0.2])
+                    c_txt.write(f"**{p}**")
+                    c_btn.button("❌", key=f"del_r_{p}", on_click=remove_player, args=(p, 'recv'))
 
-def _get_weekly_schedule_matrix_impl():
-    url_sched = "https://api-web.nhle.com/v1/schedule/now"
-    url_stand = "https://api-web.nhle.com/v1/standings/now"
-    try:
-        resp_sched = requests.get(url_sched, timeout=5)
-        data_sched = resp_sched.json()
-        game_week = data_sched.get('gameWeek', [])
-        
-        if not game_week: return pd.DataFrame(), {}
-        
-        days_map = {} 
-        ordered_days = []
-        for day_obj in game_week:
-            date_str = day_obj['date']
-            dt = datetime.strptime(date_str, "%Y-%m-%d")
-            day_name = dt.strftime("%A") 
-            days_map[date_str] = day_name
-            ordered_days.append(day_name)
+        # --- CALCULATIONS ---
+        if st.session_state.trade_send or st.session_state.trade_recv:
+            st.divider()
             
-        all_teams = sorted(list(set([g['homeTeam']['abbrev'] for d in game_week for g in d['games']] + 
-                                    [g['awayTeam']['abbrev'] for d in game_week for g in d['games']])))
-        
-        matrix = pd.DataFrame(index=all_teams, columns=ordered_days).fillna("")
-        
-        for day_obj in game_week:
-            date_str = day_obj['date']
-            day_name = days_map[date_str]
-            for game in day_obj['games']:
-                home = game['homeTeam']['abbrev']
-                away = game['awayTeam']['abbrev']
-                matrix.at[home, day_name] = f"vs {away}"
-                matrix.at[away, day_name] = f"@ {home}"
-
-        resp_stand = requests.get(url_stand, timeout=5)
-        data_stand = resp_stand.json()
-        standings = {}
-        for team in data_stand.get('standings', []):
-            team_abbr = team['teamAbbrev']['default']
-            standings[team_abbr] = team.get('pointPctg', 0.5)
+            df_send = df[df['Player'].isin(st.session_state.trade_send)]
+            df_recv = df[df['Player'].isin(st.session_state.trade_recv)]
             
-        return matrix, standings
-    except:
-        return pd.DataFrame(), {}
+            if not df_send.empty and not df_recv.empty:
+                send_fp = df_send['ROS_FP'].sum()
+                recv_fp = df_recv['ROS_FP'].sum()
+                diff = recv_fp - send_fp
+                st.subheader("The Verdict")
+                if diff > 0: st.markdown(f"""<div class="trade-box trade-win"><h2>✅ You Win!</h2><p>Projected Gain: <b>+{diff:.1f} FP</b></p></div>""", unsafe_allow_html=True)
+                elif diff < 0: st.markdown(f"""<div class="trade-box trade-loss"><h2>❌ You Lose.</h2><p>Projected Loss: <b>{diff:.1f} FP</b></p></div>""", unsafe_allow_html=True)
+                else: st.info("Trade is even.")
 
-@st.cache_data(ttl=3600)
-def load_nhl_news():
-    url = "http://site.api.espn.com/apis/site/v2/sports/hockey/nhl/news"
-    try:
-        response = requests.get(url, timeout=5)
-        data = response.json()
-        articles = []
-        for article in data.get('articles', [])[:6]: 
-            articles.append({
-                "headline": article.get('headline', 'No Headline'),
-                "description": article.get('description', ''),
-                "link": article['links']['web']['href'] if 'links' in article else '#'
-            })
-        return articles
-    except: return []
+            # SUMMARY TABLE
+            st.markdown("#### Projected Totals (Rest of Season)")
+            stats_map = {'Fantasy Points': 'ROS_FP', 'Goals': 'ROS_G', 'Assists': 'ROS_A', 'Points': 'ROS_Pts', 'PPP': 'ROS_PPP', 'SOG': 'ROS_SOG', 'Hits': 'ROS_Hits', 'Blocks': 'ROS_BkS', 'Wins': 'ROS_W'}
+            
+            summary_data = []
+            for label, col in stats_map.items():
+                if col in df.columns:
+                    val_s = df_send[col].sum()
+                    val_r = df_recv[col].sum()
+                    summary_data.append({'Stat': label, 'Sending': val_s, 'Receiving': val_r, 'Net': val_r - val_s})
+            
+            summary_df = pd.DataFrame(summary_data).set_index('Stat')
 
+            def highlight_winner(row):
+                s, r = row['Sending'], row['Receiving']
+                green, red = 'color: #4caf50; font-weight: bold', 'color: #f44336; font-weight: bold'
+                if r > s: return [red, green, green] 
+                elif s > r: return [green, red, red] 
+                return ['', '', '',]
+
+            styled_summary = summary_df.style.format("{:+.1f}", subset=['Net']).format("{:.1f}", subset=['Sending', 'Receiving']).apply(highlight_winner, axis=1)
+            st.dataframe(styled_summary, use_container_width=True)
+
+            # INDIVIDUAL PLAYERS (Fixed KeyError)
+            st.caption("Individual Player Stats (Current & Projected)")
+            full_list = pd.concat([df_send, df_recv])
+            if not full_list.empty:
+                full_list['Side'] = full_list['Player'].apply(lambda x: 'Receiving' if x in st.session_state.trade_recv else 'Sending')
+                
+                # We show current (G, A, Pts) and ROS (ROS_G, ROS_A, ROS_Pts)
+                cols_to_show = [
+                    'Side', 'Player', 'Team', 'Pos', 'FP', 'ROS_FP',
+                    'G', 'ROS_G', 'A', 'ROS_A', 'Pts', 'ROS_Pts', 'PPP', 'ROS_PPP',
+                    'SOG', 'ROS_SOG', 'Hits', 'ROS_Hits'
+                ]
+                
+                final_cols = [c for c in cols_to_show if c in full_list.columns]
+                
+                # Define current stats subset for integer formatting
+                current_stats = ['G', 'A', 'Pts', 'PPP', 'SOG', 'Hits']
+                valid_current = [c for c in current_stats if c in final_cols] # Use final_cols to be safe
+                
+                # ROS stats subset for 1 decimal
+                proj_stats = [c for c in final_cols if 'ROS_' in c or 'FP' in c]
+
+                # Style the subset of the dataframe
+                styled_player_table = full_list[final_cols].style \
+                    .format("{:.0f}", subset=valid_current) \
+                    .format("{:.1f}", subset=proj_stats)
+
+                st.dataframe(styled_player_table, use_container_width=True, hide_index=True)
+
+    # ================= TAB 4: MY ROSTER =================
+    with tab_fantasy:
+        st.header("⚔️ My Roster")
+        col_up, _ = st.columns([1, 2])
+        uploaded_file = col_up.file_uploader("📂 Load Saved Roster", type=["csv"])
+        if uploaded_file:
+            try:
+                udf = pd.read_csv(uploaded_file)
+                if "Player" in udf.columns: 
+                    st.session_state.my_roster = [p for p in udf["Player"] if p in df['Player'].values]
+            except: pass
+
+        selected_players = st.multiselect("Search Players:", df['Player'].unique(), default=st.session_state.my_roster)
+        st.session_state.my_roster = selected_players
+
+        if selected_players:
+            team_df = df[df['Player'].isin(selected_players)]
+            st.download_button("💾 Save Roster", team_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Goals", int(team_df['G'].sum()))
+            c2.metric("Points", int(team_df['Pts'].sum()))
+            c3.metric("Total FP", f"{team_df['FP'].sum():,.1f}")
+            c4.metric("Goalie Wins", int(team_df['W'].sum()))
+            
+            styled_team = team_df.style.format("{:.0f}", subset=[c for c in whole_num_cols if c in team_df.columns])
+            styled_team = styled_team.format("{:.1f}", subset=['FP'])
+            cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining']]
+            st.dataframe(styled_team, use_container_width=True, hide_index=True, column_order=cols)
