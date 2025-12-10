@@ -7,10 +7,9 @@ def load_nhl_data():
     Fetches 2024-2025 Regular Season stats for all skaters.
     Endpoint: https://api.nhle.com/stats/rest/en/skater/summary
     """
-    # This is the endpoint used by the official NHL.com/stats page
     url = "https://api.nhle.com/stats/rest/en/skater/summary"
 
-    # params to get all players (limit=-1) for current season (20242025) and regular season (gameTypeId=2)
+    # Simplified params to minimize errors
     params = {
         "isAggregate": "false",
         "isGame": "false",
@@ -32,12 +31,17 @@ def load_nhl_data():
 
         df = pd.DataFrame(players_list)
 
-        # 1. Clean up Player Name (The Stats API uses 'skaterFullName')
-        df['Player'] = df['skaterFullName']
+        # --- DEBUGGING / SAFETY ---
+        # If the expected columns are missing, this helps us see what we actually got
+        # Uncomment the line below to see raw columns in your app if needed:
+        # st.write("Raw Columns:", df.columns.tolist())
 
-        # 2. Rename columns to standard Fantasy Hockey terms
-        df = df.rename(columns={
+        # 1. Standardize Column Names
+        # We use a mapping to rename whatever the API gives us to our standard names
+        rename_map = {
+            'skaterFullName': 'Player',
             'teamAbbrev': 'Team',
+            'teamName': 'Team',      # Fallback
             'positionCode': 'Pos',
             'gamesPlayed': 'GP',
             'goals': 'G',
@@ -49,23 +53,34 @@ def load_nhl_data():
             'shots': 'SOG',
             'shootingPct': 'Sh%',
             'faceoffWinPct': 'FO%'
-        })
+        }
+        df = df.rename(columns=rename_map)
 
-        # 3. Ensure numeric columns are actually numbers (for sorting)
+        # 2. Ensure Critical Columns Exist
+        # If 'Team' or 'Pos' are missing after rename, create them with defaults to prevent crash
+        if 'Team' not in df.columns:
+            df['Team'] = 'N/A'
+        if 'Pos' not in df.columns:
+            df['Pos'] = 'N/A'
+        if 'Player' not in df.columns:
+            # Fallback for player name if skaterFullName is missing
+            df['Player'] = df['lastName'] if 'lastName' in df.columns else 'Unknown'
+
+        # 3. Ensure Numeric Columns
         numeric_cols = ['GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'SOG', 'Sh%', 'FO%']
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            else:
+                # If a stat column is missing, just fill it with 0
+                df[col] = 0
 
-        # 4. Select and Reorder columns
+        # 4. Final Selection
         cols_to_keep = ['Player', 'Team', 'Pos'] + numeric_cols
-        
-        # Safety check to only keep columns that exist
-        final_cols = [c for c in cols_to_keep if c in df.columns]
-        
-        return df[final_cols]
+        return df[cols_to_keep]
 
     except Exception as e:
         st.error(f"Error connecting to NHL Stats API: {e}")
         return pd.DataFrame()
+
 
