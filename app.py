@@ -147,27 +147,24 @@ else:
         cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType']]
         df = df[cols]
 
-        # --- STRICT FORMAT CONFIGURATION ---
         column_config = {
             "ID": None,
             "Player": st.column_config.TextColumn("Player", pinned=True),
             "FP": st.column_config.NumberColumn("FP", help="Fantasy Points", format="%.1f"),
             "Team": st.column_config.TextColumn("Team"),
             "Pos": st.column_config.TextColumn("Pos"),
-            # Integers (No Decimals)
-            "GP": st.column_config.NumberColumn("GP", format="%.0f"),
-            "G": st.column_config.NumberColumn("G", format="%.0f"),
-            "A": st.column_config.NumberColumn("A", format="%.0f"),
-            "Pts": st.column_config.NumberColumn("Pts", format="%.0f"),
-            "PPP": st.column_config.NumberColumn("PPP", format="%.0f"),
-            "SHP": st.column_config.NumberColumn("SHP", format="%.0f"),
-            "SOG": st.column_config.NumberColumn("SOG", format="%.0f"),
-            "Hits": st.column_config.NumberColumn("Hits", format="%.0f"),
-            "BkS": st.column_config.NumberColumn("BkS", format="%.0f"),
-            "W": st.column_config.NumberColumn("W", format="%.0f"),
-            # Decimals/Rates
-            "SAT%": st.column_config.NumberColumn("SAT%", format="%.1f%%"),
-            "USAT%": st.column_config.NumberColumn("USAT%", format="%.1f%%"),
+            "GP": st.column_config.NumberColumn("GP", help="Games Played"),
+            "G": st.column_config.NumberColumn("G", help="Goals"),
+            "A": st.column_config.NumberColumn("A", help="Assists"),
+            "Pts": st.column_config.NumberColumn("Pts", help="Points"),
+            "PPP": st.column_config.NumberColumn("PPP", help="PPP"),
+            "SHP": st.column_config.NumberColumn("SHP", help="SHP"),
+            "SOG": st.column_config.NumberColumn("SOG", help="SOG"),
+            "Hits": st.column_config.NumberColumn("Hits", help="Hits"),
+            "BkS": st.column_config.NumberColumn("BkS", help="Blocks"),
+            "SAT%": st.column_config.NumberColumn("SAT%", help="Corsi %", format="%.1f%%"),
+            "USAT%": st.column_config.NumberColumn("USAT%", help="Fenwick %", format="%.1f%%"),
+            "W": st.column_config.NumberColumn("W", help="Wins"),
             "SV%": st.column_config.NumberColumn("SV%", format="%.3f"),
             "GAA": st.column_config.NumberColumn("GAA", format="%.2f"),
             "GSAA": st.column_config.NumberColumn("GSAA", format="%.2f"),
@@ -188,20 +185,28 @@ else:
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
 
-        # --- HIGHLIGHT LOGIC ---
-        # 1. Define function that returns specific CSS string
+        # --- HIGHLIGHT + FORMAT LOGIC ---
         def highlight_my_team(row):
-            # If the player name is in the roster list
             if row['Player'] in st.session_state.my_roster:
-                # Return 'background-color' for the WHOLE row
                 return ['background-color: #574d28'] * len(row) 
             else:
                 return [''] * len(row)
 
-        # 2. Apply style
+        # APPLY HIGHLIGHTING
         styled_df = filt_df.style.apply(highlight_my_team, axis=1)
 
-        # 3. Render
+        # --- CRITICAL FIX: FORCE FORMATTING VIA PANDAS STYLER ---
+        # This overrides Streamlit's display logic to force 0 decimals
+        whole_num_cols = ['GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SO', 'OTL']
+        # Intersect with columns actually in the dataframe to prevent errors
+        valid_whole_cols = [c for c in whole_num_cols if c in filt_df.columns]
+        
+        styled_df = styled_df.format("{:.0f}", subset=valid_whole_cols)
+        styled_df = styled_df.format("{:.1f}", subset=['FP'])
+        styled_df = styled_df.format("{:.2f}", subset=['GAA', 'GSAA'])
+        styled_df = styled_df.format("{:.3f}", subset=['SV%'])
+        # -------------------------------------------------------
+
         st.dataframe(
             styled_df, 
             use_container_width=True, 
@@ -244,4 +249,8 @@ else:
             c3.metric("Total FP", f"{total_fp:,.1f}")
             c4.metric("Goalie Wins", int(team_df['W'].sum()))
             
-            st.dataframe(team_df, use_container_width=True, hide_index=True, column_config=column_config)
+            # Apply same formatting to roster table
+            styled_team_df = team_df.style.format("{:.0f}", subset=[c for c in whole_num_cols if c in team_df.columns])
+            styled_team_df = styled_team_df.format("{:.1f}", subset=['FP'])
+            
+            st.dataframe(styled_team_df, use_container_width=True, hide_index=True, column_config=column_config)
