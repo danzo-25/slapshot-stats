@@ -20,10 +20,8 @@ def add_player_from_select(side):
     if player:
         target = st.session_state.trade_send if side == 'send' else st.session_state.trade_recv
         other = st.session_state.trade_recv if side == 'send' else st.session_state.trade_send
-        
         if player not in target and player not in other:
             target.append(player)
-        
         st.session_state[key] = None
 
 def remove_player(player, side):
@@ -171,7 +169,7 @@ else:
         cols = ['ID', 'Player', 'Team', 'Pos', 'FP', 'ROS_FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining'] and not c.startswith('ROS_')]
         st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_order=cols)
 
-    # ================= TAB 3: FANTASY TOOLS (FIXED TABLE) =================
+    # ================= TAB 3: FANTASY TOOLS =================
     with tab_tools:
         st.header("⚖️ Trade Analyzer")
         st.info("Compare players based on current stats and **Rest of Season (ROS)** projections.")
@@ -229,15 +227,13 @@ else:
             df_recv = df[df['Player'].isin(st.session_state.trade_recv)]
             
             if not df_send.empty and not df_recv.empty:
-                send_fp = df_send['ROS_FP'].sum()
-                recv_fp = df_recv['ROS_FP'].sum()
-                diff = recv_fp - send_fp
+                diff = df_recv['ROS_FP'].sum() - df_send['ROS_FP'].sum()
                 st.subheader("The Verdict")
                 if diff > 0: st.markdown(f"""<div class="trade-box trade-win"><h2>✅ You Win!</h2><p>Projected Gain: <b>+{diff:.1f} FP</b></p></div>""", unsafe_allow_html=True)
                 elif diff < 0: st.markdown(f"""<div class="trade-box trade-loss"><h2>❌ You Lose.</h2><p>Projected Loss: <b>{diff:.1f} FP</b></p></div>""", unsafe_allow_html=True)
                 else: st.info("Trade is even.")
 
-            # SUMMARY TABLE
+            # Summary Table
             st.markdown("#### Projected Totals (Rest of Season)")
             stats_map = {'Fantasy Points': 'ROS_FP', 'Goals': 'ROS_G', 'Assists': 'ROS_A', 'Points': 'ROS_Pts', 'PPP': 'ROS_PPP', 'SOG': 'ROS_SOG', 'Hits': 'ROS_Hits', 'Blocks': 'ROS_BkS', 'Wins': 'ROS_W'}
             
@@ -260,34 +256,69 @@ else:
             styled_summary = summary_df.style.format("{:+.1f}", subset=['Net']).format("{:.1f}", subset=['Sending', 'Receiving']).apply(highlight_winner, axis=1)
             st.dataframe(styled_summary, use_container_width=True)
 
-            # INDIVIDUAL PLAYERS (Fixed KeyError)
+            # --- INDIVIDUAL PLAYERS (With Headshots + Tooltips) ---
             st.caption("Individual Player Stats (Current & Projected)")
             full_list = pd.concat([df_send, df_recv])
+            
             if not full_list.empty:
                 full_list['Side'] = full_list['Player'].apply(lambda x: 'Receiving' if x in st.session_state.trade_recv else 'Sending')
                 
-                # We show current (G, A, Pts) and ROS (ROS_G, ROS_A, ROS_Pts)
+                # --- NEW: ADD HEADSHOT URL ---
+                # We use the standard NHL asset URL pattern
+                full_list['Headshot'] = full_list['ID'].apply(lambda x: f"https://assets.nhle.com/mugs/nhl/20252026/{x}.png")
+
+                # Define Display Columns
                 cols_to_show = [
-                    'Side', 'Player', 'Team', 'Pos', 'FP', 'ROS_FP',
-                    'G', 'ROS_G', 'A', 'ROS_A', 'Pts', 'ROS_Pts', 'PPP', 'ROS_PPP',
-                    'SOG', 'ROS_SOG', 'Hits', 'ROS_Hits'
+                    'Side', 'Headshot', 'Player', 'Team', 'Pos', 
+                    'FP', 'ROS_FP',
+                    'G', 'ROS_G',
+                    'A', 'ROS_A',
+                    'Pts', 'ROS_Pts',
+                    'PPP', 'ROS_PPP',
+                    'SOG', 'ROS_SOG',
+                    'Hits', 'ROS_Hits'
                 ]
                 
                 final_cols = [c for c in cols_to_show if c in full_list.columns]
                 
-                # Define current stats subset for integer formatting
-                current_stats = ['G', 'A', 'Pts', 'PPP', 'SOG', 'Hits']
-                valid_current = [c for c in current_stats if c in final_cols] # Use final_cols to be safe
-                
-                # ROS stats subset for 1 decimal
-                proj_stats = [c for c in final_cols if 'ROS_' in c or 'FP' in c]
+                # Define Column Config with Tooltips and Images
+                trade_col_config = {
+                    "Headshot": st.column_config.ImageColumn("Img", help="Player Headshot"),
+                    "Side": st.column_config.TextColumn("Side", pinned=True),
+                    "Player": st.column_config.TextColumn("Player", pinned=True),
+                    "FP": st.column_config.NumberColumn("FP", help="Current Fantasy Points", format="%.1f"),
+                    "ROS_FP": st.column_config.NumberColumn("ROS FP", help="Rest of Season Projected FP", format="%.1f"),
+                    "G": st.column_config.NumberColumn("G", help="Current Goals", format="%.0f"),
+                    "ROS_G": st.column_config.NumberColumn("ROS G", help="Projected Goals (Rest of Season)", format="%.1f"),
+                    "A": st.column_config.NumberColumn("A", help="Current Assists", format="%.0f"),
+                    "ROS_A": st.column_config.NumberColumn("ROS A", help="Projected Assists (Rest of Season)", format="%.1f"),
+                    "Pts": st.column_config.NumberColumn("Pts", help="Current Points", format="%.0f"),
+                    "ROS_Pts": st.column_config.NumberColumn("ROS Pts", help="Projected Points (Rest of Season)", format="%.1f"),
+                    "PPP": st.column_config.NumberColumn("PPP", help="Current Power Play Points", format="%.0f"),
+                    "ROS_PPP": st.column_config.NumberColumn("ROS PPP", help="Projected PPP (Rest of Season)", format="%.1f"),
+                    "SOG": st.column_config.NumberColumn("SOG", help="Current Shots", format="%.0f"),
+                    "ROS_SOG": st.column_config.NumberColumn("ROS SOG", help="Projected Shots (Rest of Season)", format="%.1f"),
+                    "Hits": st.column_config.NumberColumn("Hits", help="Current Hits", format="%.0f"),
+                    "ROS_Hits": st.column_config.NumberColumn("ROS Hits", help="Projected Hits (Rest of Season)", format="%.1f"),
+                }
 
-                # Style the subset of the dataframe
+                # Apply Formatting
+                current_stats = ['G', 'A', 'Pts', 'PPP', 'SOG', 'Hits', 'BkS']
+                valid_current = [c for c in current_stats if c in final_cols]
+                
+                proj_stats = [c for c in final_cols if 'ROS_' in c or 'FP' in c]
+                
                 styled_player_table = full_list[final_cols].style \
                     .format("{:.0f}", subset=valid_current) \
                     .format("{:.1f}", subset=proj_stats)
 
-                st.dataframe(styled_player_table, use_container_width=True, hide_index=True)
+                st.dataframe(
+                    styled_player_table, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config=trade_col_config, # Apply Tooltips & Images
+                    row_height=60 # Make rows slightly taller for images
+                )
 
     # ================= TAB 4: MY ROSTER =================
     with tab_fantasy:
@@ -317,3 +348,4 @@ else:
             styled_team = styled_team.format("{:.1f}", subset=['FP'])
             cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining']]
             st.dataframe(styled_team, use_container_width=True, hide_index=True, column_order=cols)
+
