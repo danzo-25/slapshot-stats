@@ -262,12 +262,16 @@ else:
         def highlight_my_team(row):
             return ['background-color: #574d28'] * len(row) if row['Player'] in st.session_state.my_roster else [''] * len(row)
         styled_df = filt_df.style.apply(highlight_my_team, axis=1)
+        
+        # Safe formatting for Analytics tab
         whole_num_cols = ['GWG', 'GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SO', 'OTL', '+/-']
         valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
+        
         styled_df = styled_df.format("{:.0f}", subset=valid_whole)
-        styled_df = styled_df.format("{:.1f}", subset=['FP', 'ROS_FP', 'Sh%', 'FO%', 'SAT%', 'USAT%'])
-        styled_df = styled_df.format("{:.2f}", subset=['GAA', 'GSAA'])
-        styled_df = styled_df.format("{:.3f}", subset=['SV%'])
+        styled_df = styled_df.format("{:.1f}", subset=[c for c in ['FP', 'ROS_FP', 'Sh%', 'FO%', 'SAT%', 'USAT%'] if c in filt_df.columns])
+        styled_df = styled_df.format("{:.2f}", subset=[c for c in ['GAA', 'GSAA'] if c in filt_df.columns])
+        styled_df = styled_df.format("{:.3f}", subset=[c for c in ['SV%'] if c in filt_df.columns])
+        
         cols = ['ID', 'Player', 'Team', 'Pos', 'FP', 'ROS_FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining'] and not c.startswith('ROS_')]
         st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_order=cols)
 
@@ -439,10 +443,10 @@ else:
             st.download_button("💾 Save Roster", base_team_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
             
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Goals", int(display_df['G'].sum()) if 'G' in display_df else 0)
-            c2.metric("Points", int(display_df['Pts'].sum()) if 'Pts' in display_df else 0)
-            c3.metric("Total FP", f"{display_df['FP'].sum():,.1f}" if 'FP' in display_df else "0.0")
-            c4.metric("Goalie Wins", int(display_df['W'].sum()) if 'W' in display_df else 0)
+            c1.metric("Goals", int(display_df['G'].sum()) if 'G' in display_df.columns else 0)
+            c2.metric("Points", int(display_df['Pts'].sum()) if 'Pts' in display_df.columns else 0)
+            c3.metric("Total FP", f"{display_df['FP'].sum():,.1f}" if 'FP' in display_df.columns else "0.0")
+            c4.metric("Goalie Wins", int(display_df['W'].sum()) if 'W' in display_df.columns else 0)
             
             # --- RENDER TABLE ---
             # Define all possible columns for the table (excluding ID and PosType)
@@ -464,7 +468,7 @@ else:
                 "GSAA": st.column_config.NumberColumn("GSAA", format="%.2f", help="Goals Saved Above Average"),
                 "SO": st.column_config.NumberColumn("SO", format="%.0f", help="Shutouts"),
                 "PIM": st.column_config.NumberColumn("PIM", format="%.0f"),
-                "Hits": st.column_config.Number_Column("Hits", format="%.0f"),
+                "Hits": st.column_config.NumberColumn("Hits", format="%.0f"),
                 "BkS": st.column_config.NumberColumn("BkS", format="%.0f"),
                 "G": st.column_config.NumberColumn("G", format="%.0f"),
                 "A": st.column_config.NumberColumn("A", format="%.0f"),
