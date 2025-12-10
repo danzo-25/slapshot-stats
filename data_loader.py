@@ -4,8 +4,11 @@ import streamlit as st
 from datetime import datetime, timedelta
 import pytz
 
-def fetch_data(endpoint, sort_key, extra_filter=""):
-    """Helper to fetch summary data"""
+def fetch_data(endpoint, sort_key, extra_filter="", aggregate=False):
+    """
+    Helper to fetch summary data.
+    Added 'aggregate' param to allow summing stats over custom date ranges.
+    """
     url = f"https://api.nhle.com/stats/rest/en/{endpoint}/summary"
     
     # Base filter for 2025-2026 Regular Season
@@ -14,11 +17,12 @@ def fetch_data(endpoint, sort_key, extra_filter=""):
         base_exp += f" and {extra_filter}"
 
     params = {
-        "isAggregate": "false",
+        # FIX: Dynamically set isAggregate based on the function call
+        "isAggregate": "true" if aggregate else "false",
         "isGame": "false",
         "sort": f'[{{"property":"{sort_key}","direction":"DESC"}}]',
         "start": 0,
-        "limit": 50, # Limit to top 50 for weekly leaders to save speed
+        "limit": 50,
         "cayenneExp": base_exp
     }
     try:
@@ -32,8 +36,8 @@ def fetch_data(endpoint, sort_key, extra_filter=""):
 
 def load_nhl_data():
     """Fetches Season Summary for Skaters and Goalies (Full Season)."""
-    # 1. Fetch Skaters
-    df_skaters = fetch_data("skater", "points")
+    # 1. Fetch Skaters (aggregate=False for season totals)
+    df_skaters = fetch_data("skater", "points", aggregate=False)
     if not df_skaters.empty:
         df_skaters['PosType'] = 'Skater'
         df_skaters = df_skaters.rename(columns={
@@ -45,7 +49,7 @@ def load_nhl_data():
         })
 
     # 2. Fetch Goalies
-    df_goalies = fetch_data("goalie", "wins")
+    df_goalies = fetch_data("goalie", "wins", aggregate=False)
     if not df_goalies.empty:
         df_goalies['PosType'] = 'Goalie'
         df_goalies['Pos'] = 'G'
@@ -92,8 +96,6 @@ def get_player_game_log(player_id):
         return df_log.sort_values(by='gameDate')
     except: return pd.DataFrame()
 
-# --- NEW: SCHEDULE & WEEKLY LEADERS ---
-
 def load_schedule():
     """Fetches the current week's schedule and filters for Today."""
     url = "https://api-web.nhle.com/v1/schedule/now"
@@ -102,10 +104,8 @@ def load_schedule():
         response.raise_for_status()
         data = response.json()
         
-        # Get today's date in YYYY-MM-DD
         today_str = datetime.now().strftime("%Y-%m-%d")
         
-        # Find games for today
         todays_games = []
         for day in data.get('gameWeek', []):
             if day['date'] == today_str:
@@ -114,7 +114,6 @@ def load_schedule():
         
         processed_games = []
         for g in todays_games:
-            # Convert UTC to EST
             utc_time = datetime.strptime(g['startTimeUTC'], "%Y-%m-%dT%H:%M:%SZ")
             utc_time = utc_time.replace(tzinfo=pytz.utc)
             est_time = utc_time.astimezone(pytz.timezone('US/Eastern'))
@@ -134,25 +133,22 @@ def load_schedule():
 
 def load_weekly_leaders():
     """Fetches top performers for the last 7 days."""
-    # Calculate date 7 days ago
     end_date = datetime.now()
     start_date = end_date - timedelta(days=7)
     
     date_filter = f"gameDate >= '{start_date.strftime('%Y-%m-%d')}' and gameDate <= '{end_date.strftime('%Y-%m-%d')}'"
     
-    # We reuse fetch_data but with the date filter
-    df = fetch_data("skater", "points", extra_filter=date_filter)
+    # FIX: We MUST set aggregate=True here to sum up the stats for the week
+    df = fetch_data("skater", "points", extra_filter=date_filter, aggregate=True)
     
     if df.empty: return pd.DataFrame()
 
-    # Rename just enough for the charts
     rename_map = {
         'skaterFullName': 'Player', 'teamAbbrevs': 'Team', 'positionCode': 'Pos',
         'goals': 'G', 'assists': 'A', 'points': 'Pts', 'shots': 'SOG', 'ppPoints': 'PPP'
     }
     df = df.rename(columns=rename_map)
     return df
-
 
 
 
