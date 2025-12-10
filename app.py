@@ -210,4 +210,64 @@ else:
             "W": st.column_config.NumberColumn("W", format="%.0f"),
             "GA": st.column_config.NumberColumn("GA", format="%.0f"),
             "Svs": st.column_config.NumberColumn("Svs", format="%.0f"),
-            "SO": st
+            "SO": st.column_config.NumberColumn("SO", format="%.0f"),
+            "SAT%": st.column_config.NumberColumn("SAT%", format="%.1f%%"),
+            "USAT%": st.column_config.NumberColumn("USAT%", format="%.1f%%"),
+            "SV%": st.column_config.NumberColumn("SV%", format="%.3f"),
+            "GAA": st.column_config.NumberColumn("GAA", format="%.2f"),
+            "GSAA": st.column_config.NumberColumn("GSAA", format="%.2f"),
+            "TOI": st.column_config.TextColumn("TOI")
+        }
+
+        with st.expander("Filter Options"):
+            c1, c2 = st.columns(2)
+            teams = sorted(df['Team'].unique())
+            sel_teams = c1.multiselect("Team", teams, default=teams)
+            pos = sorted(df['Pos'].unique())
+            sel_pos = c2.multiselect("Position", pos, default=pos)
+
+        filt_df = df.copy()
+        if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
+        if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
+
+        def highlight_my_team(row):
+            return ['background-color: #574d28'] * len(row) if row['Player'] in st.session_state.my_roster else [''] * len(row)
+
+        styled_df = filt_df.style.apply(highlight_my_team, axis=1)
+        
+        whole_num_cols = ['GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SO', 'OTL', '+/-']
+        valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
+        styled_df = styled_df.format("{:.0f}", subset=valid_whole)
+        styled_df = styled_df.format("{:.1f}", subset=['FP', 'Sh%', 'FO%', 'SAT%', 'USAT%'])
+        styled_df = styled_df.format("{:.2f}", subset=['GAA', 'GSAA'])
+        styled_df = styled_df.format("{:.3f}", subset=['SV%'])
+
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_config=column_config)
+
+    # ================= TAB 3: FANTASY =================
+    with tab_fantasy:
+        st.header("⚔️ My Roster")
+        col_up, _ = st.columns([1, 2])
+        uploaded_file = col_up.file_uploader("📂 Load Saved Roster", type=["csv"])
+        if uploaded_file:
+            try:
+                udf = pd.read_csv(uploaded_file)
+                if "Player" in udf.columns: 
+                    st.session_state.my_roster = [p for p in udf["Player"] if p in df['Player'].values]
+            except: pass
+
+        selected_players = st.multiselect("Search Players:", df['Player'].unique(), default=st.session_state.my_roster)
+        st.session_state.my_roster = selected_players
+
+        if selected_players:
+            team_df = df[df['Player'].isin(selected_players)]
+            st.download_button("💾 Save Roster", team_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Goals", int(team_df['G'].sum()))
+            c2.metric("Points", int(team_df['Pts'].sum()))
+            c3.metric("Total FP", f"{team_df['FP'].sum():,.1f}")
+            c4.metric("Goalie Wins", int(team_df['W'].sum()))
+            
+            styled_team = team_df.style.format("{:.0f}", subset=[c for c in whole_num_cols if c in team_df.columns])
+            styled_team = styled_team.format("{:.1f}", subset=['FP'])
+            st.dataframe(styled_team, use_container_width=True, hide_index=True, column_config=column_config)
