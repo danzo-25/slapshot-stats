@@ -13,10 +13,8 @@ if "trade_recv" not in st.session_state: st.session_state.trade_recv = []
 
 # --- CALLBACKS ---
 def add_player_from_select(side):
-    """Adds player from selectbox and clears it."""
     key = "sb_send" if side == 'send' else "sb_recv"
     player = st.session_state.get(key)
-    
     if player:
         target = st.session_state.trade_send if side == 'send' else st.session_state.trade_recv
         other = st.session_state.trade_recv if side == 'send' else st.session_state.trade_send
@@ -40,27 +38,49 @@ st.markdown("""
     .vs-text { font-size: 1em; font-weight: bold; color: #888; padding-top: 5px; }
     .game-time { margin-top: 5px; font-weight: bold; color: #FF4B4B; font-size: 0.9em; border-top: 1px solid #41444e; padding-top: 2px; }
     .game-live { margin-top: 5px; font-weight: bold; color: #ff4b4b; font-size: 1.0em; border-top: 1px solid #41444e; padding-top: 2px; animation: pulse 2s infinite; }
-    
-    @keyframes pulse {
-        0% { opacity: 1; }
-        50% { opacity: 0.7; }
-        100% { opacity: 1; }
-    }
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
 
-    .news-card { background-color: #1e1e1e; border-left: 4px solid #0083b8; padding: 10px; margin-bottom: 10px; border-radius: 4px; }
-    .news-title { font-weight: bold; font-size: 1.05em; color: #fff; text-decoration: none; }
-    .news-desc { font-size: 0.9em; color: #ccc; margin-top: 5px; }
+    /* NEWS CARD STYLING (With Image) */
+    .news-card {
+        display: flex;
+        background-color: #1e1e1e;
+        border: 1px solid #333;
+        margin-bottom: 10px;
+        border-radius: 5px;
+        overflow: hidden;
+        transition: transform 0.2s;
+    }
+    .news-card:hover { transform: translateY(-2px); border-color: #555; }
+    .news-img {
+        width: 100px;
+        height: auto;
+        object-fit: cover;
+        flex-shrink: 0; /* Don't shrink image */
+    }
+    .news-content { padding: 10px; display: flex; flex-direction: column; justify-content: center; }
+    .news-title { font-weight: bold; font-size: 0.95em; color: #fff; text-decoration: none; margin-bottom: 4px; line-height: 1.2; }
+    .news-title:hover { color: #4da6ff; }
+    .news-desc { font-size: 0.85em; color: #aaa; margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+    /* TRADE STYLES */
     .trade-win { background-color: rgba(76, 175, 80, 0.15); border: 2px solid #4caf50; padding: 15px; border-radius: 8px; text-align: center; }
     .trade-loss { background-color: rgba(244, 67, 54, 0.15); border: 2px solid #f44336; padding: 15px; border-radius: 8px; text-align: center; }
+    .selected-player-card { background-color: #333; border: 1px solid #555; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
     
-    /* SELECTED PLAYER CARD STYLING */
-    .selected-player-card {
-        background-color: #333;
-        border: 1px solid #555;
-        border-radius: 8px;
-        padding: 10px;
-        margin-bottom: 8px;
+    /* LINK BUTTONS */
+    .link-btn {
+        display: block;
+        background-color: #262730;
+        color: #ddd;
+        text-align: center;
+        padding: 8px;
+        margin-bottom: 5px;
+        text-decoration: none;
+        border-radius: 4px;
+        font-size: 0.9em;
+        border: 1px solid #444;
     }
+    .link-btn:hover { background-color: #444; color: white; border-color: #666; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -70,7 +90,6 @@ with st.spinner('Loading NHL Data...'):
 if df.empty:
     st.warning("No data found. API might be down.")
 else:
-    # --- SIDEBAR ---
     with st.sidebar:
         st.header("⚙️ League Settings")
         with st.expander("Fantasy Scoring (FP)", expanded=False):
@@ -87,7 +106,7 @@ else:
             val_SO = st.number_input("Shutouts", value=3.0)
             val_OTL = st.number_input("OTL", value=1.0)
 
-    # --- GLOBAL CALC ---
+    # Global FP
     df['FP'] = ((df['G'] * val_G) + (df['A'] * val_A) + (df['PPP'] * val_PPP) + 
                 (df['SHP'] * val_SHP) + (df['SOG'] * val_SOG) + (df['Hits'] * val_Hit) + 
                 (df['BkS'] * val_BkS) + (df['W'] * val_W) + (df['GA'] * val_GA) + 
@@ -112,9 +131,7 @@ else:
                     if i + j < len(schedule):
                         game = schedule[i+j]
                         with cols[j]:
-                            # CSS Class changes if LIVE
                             status_class = "game-live" if game.get("is_live") else "game-time"
-                            
                             st.markdown(f"""
                             <div class="game-card">
                                 <div class="team-row">
@@ -126,6 +143,8 @@ else:
                             </div>""", unsafe_allow_html=True)
         st.divider()
         col_sos, col_news = st.columns([2, 1])
+        
+        # --- SOS TABLE ---
         with col_sos:
             st.header("💪 Strength of Schedule")
             with st.spinner("Calculating..."):
@@ -145,13 +164,39 @@ else:
                 styled_sos = sos_matrix.style.apply(lambda row: [color_sos(val, row.name) for val in row], axis=1).set_properties(**{'text-align': 'center'})
                 st.dataframe(styled_sos, use_container_width=False, height=500, width=800)
             else: st.info("SOS data unavailable.")
+
+        # --- NEWS FEED (With Thumbnails) ---
         with col_news:
-            st.header("📰 Latest News")
+            st.header("📰 Latest Headlines")
             news = load_nhl_news()
+            
             if news:
                 for article in news:
-                    st.markdown(f"""<div class="news-card"><a href="{article['link']}" target="_blank" class="news-title">{article['headline']}</a><div class="news-desc">{article['description']}</div></div>""", unsafe_allow_html=True)
-            else: st.info("No news.")
+                    # Logic to show image only if it exists
+                    img_html = f'<img src="{article["image"]}" class="news-img">' if article['image'] else ''
+                    
+                    st.markdown(f"""
+                    <div class="news-card">
+                        {img_html}
+                        <div class="news-content">
+                            <a href="{article['link']}" target="_blank" class="news-title">{article['headline']}</a>
+                            <p class="news-desc">{article['description']}</p>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("No news available.")
+
+            # --- TRUSTED SOURCES LINKS ---
+            st.markdown("#### More Trusted Sources")
+            st.markdown("""
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+                <a href="https://www.tsn.ca/nhl" target="_blank" class="link-btn">TSN Hockey</a>
+                <a href="https://www.sportsnet.ca/nhl/" target="_blank" class="link-btn">Sportsnet</a>
+                <a href="https://www.dailyfaceoff.com/" target="_blank" class="link-btn">Daily Faceoff</a>
+                <a href="https://theathletic.com/nhl/" target="_blank" class="link-btn">The Athletic</a>
+            </div>
+            """, unsafe_allow_html=True)
 
     # ================= TAB 2: ANALYTICS =================
     with tab_analytics:
@@ -194,20 +239,17 @@ else:
         st.header("⚖️ Trade Analyzer")
         st.info("Compare players based on current stats and **Rest of Season (ROS)** projections.")
         
-        # SAFE PLAYER LIST (PREVENT CRASH)
         if 'Player' in df.columns:
             all_players = sorted(df['Player'].dropna().astype(str).unique().tolist())
         else:
             all_players = []
             st.error("Player data not found.")
 
-        # --- PLAYER CARD HELPER ---
         def show_selected_player_card(player_name, side):
             p_data = df[df['Player'] == player_name].iloc[0]
             pid = p_data['ID']
             team = p_data['Team']
-            img_url = f"https://assets.nhle.com/mugs/nhl/20242025/{team}/{pid}.png"
-            
+            img_url = f"https://assets.nhle.com/mugs/nhl/20252026/{team}/{pid}.png"
             with st.container(border=True):
                 r1, r2, r3, r4 = st.columns([0.25, 0.35, 0.3, 0.1])
                 with r1: st.image(img_url, width=60)
@@ -223,16 +265,12 @@ else:
                         st.rerun()
 
         c1, c_mid, c2 = st.columns([1, 0.1, 1])
-
-        # --- LEFT: SENDING ---
         with c1:
             st.subheader("📤 Sending")
             opts_s = [p for p in all_players if p not in st.session_state.trade_recv]
             st.selectbox("Add Player", options=opts_s, index=None, placeholder="Type to add...", key="sb_send", on_change=add_player_from_select, args=('send',), label_visibility="collapsed")
             if st.session_state.trade_send:
                 for p in st.session_state.trade_send: show_selected_player_card(p, "send")
-
-        # --- RIGHT: RECEIVING ---
         with c2:
             st.subheader("📥 Receiving")
             opts_r = [p for p in all_players if p not in st.session_state.trade_send]
@@ -240,76 +278,55 @@ else:
             if st.session_state.trade_recv:
                 for p in st.session_state.trade_recv: show_selected_player_card(p, "recv")
 
-        # --- CALCULATIONS ---
         if st.session_state.trade_send or st.session_state.trade_recv:
             st.divider()
-            
             df_send = df[df['Player'].isin(st.session_state.trade_send)]
             df_recv = df[df['Player'].isin(st.session_state.trade_recv)]
             
             if not df_send.empty and not df_recv.empty:
                 diff = df_recv['ROS_FP'].sum() - df_send['ROS_FP'].sum()
                 st.subheader("The Verdict")
-                if diff > 0: st.markdown(f"""<div class="trade-box trade-win"><h2>✅ You Win!</h2><p>Projected Gain: <b>+{diff:.1f} FP</b></p></div>""", unsafe_allow_html=True)
-                elif diff < 0: st.markdown(f"""<div class="trade-box trade-loss"><h2>❌ You Lose.</h2><p>Projected Loss: <b>{diff:.1f} FP</b></p></div>""", unsafe_allow_html=True)
+                if diff > 0: st.markdown(f"""<div class="trade-win"><h2>✅ You Win!</h2><p>Projected Gain: <b>+{diff:.1f} FP</b></p></div>""", unsafe_allow_html=True)
+                elif diff < 0: st.markdown(f"""<div class="trade-loss"><h2>❌ You Lose.</h2><p>Projected Loss: <b>{diff:.1f} FP</b></p></div>""", unsafe_allow_html=True)
                 else: st.info("Trade is even.")
 
             st.markdown("#### Projected Totals (Rest of Season)")
             stats_map = {'Fantasy Points': 'ROS_FP', 'Goals': 'ROS_G', 'Assists': 'ROS_A', 'Points': 'ROS_Pts', 'PPP': 'ROS_PPP', 'SOG': 'ROS_SOG', 'Hits': 'ROS_Hits', 'Blocks': 'ROS_BkS', 'Wins': 'ROS_W'}
-            
             summary_data = []
             for label, col in stats_map.items():
                 if col in df.columns:
-                    val_s = df_send[col].sum()
-                    val_r = df_recv[col].sum()
+                    val_s = df_send[col].sum(); val_r = df_recv[col].sum()
                     summary_data.append({'Stat': label, 'Sending': val_s, 'Receiving': val_r, 'Net': val_r - val_s})
             
             summary_df = pd.DataFrame(summary_data).set_index('Stat')
-
             def highlight_winner(row):
                 s, r = row['Sending'], row['Receiving']
                 green, red = 'color: #4caf50; font-weight: bold', 'color: #f44336; font-weight: bold'
                 if r > s: return [red, green, green] 
                 elif s > r: return [green, red, red] 
                 return ['', '', '',]
-
             styled_summary = summary_df.style.format("{:+.1f}", subset=['Net']).format("{:.1f}", subset=['Sending', 'Receiving']).apply(highlight_winner, axis=1)
             st.dataframe(styled_summary, use_container_width=True)
 
-            # INDIVIDUAL PLAYERS
             st.caption("Individual Player Stats (Current & Projected)")
             full_list = pd.concat([df_send, df_recv])
             if not full_list.empty:
                 full_list['Side'] = full_list['Player'].apply(lambda x: 'Receiving' if x in st.session_state.trade_recv else 'Sending')
-                
-                cols_to_show = [
-                    'Side', 'Player', 'Team', 'Pos', 'FP', 'ROS_FP',
-                    'G', 'ROS_G', 'A', 'ROS_A', 'Pts', 'ROS_Pts', 'PPP', 'ROS_PPP',
-                    'SOG', 'ROS_SOG', 'Hits', 'ROS_Hits'
-                ]
+                cols_to_show = ['Side', 'Player', 'Team', 'Pos', 'FP', 'ROS_FP', 'G', 'ROS_G', 'A', 'ROS_A', 'Pts', 'ROS_Pts', 'PPP', 'ROS_PPP', 'SOG', 'ROS_SOG', 'Hits', 'ROS_Hits']
                 final_cols = [c for c in cols_to_show if c in full_list.columns]
-                
                 trade_config = {
                     "Side": st.column_config.TextColumn("Side", pinned=True),
                     "Player": st.column_config.TextColumn("Player", pinned=True),
                     "FP": st.column_config.NumberColumn("FP", help="Current Fantasy Points", format="%.1f"),
                     "ROS_FP": st.column_config.NumberColumn("ROS FP", help="Rest of Season Projected FP", format="%.1f"),
-                    "G": st.column_config.NumberColumn("G", help="Current Goals"),
-                    "ROS_G": st.column_config.NumberColumn("ROS G", help="Projected Goals"),
-                    "A": st.column_config.NumberColumn("A", help="Current Assists"),
-                    "ROS_A": st.column_config.NumberColumn("ROS A", help="Projected Assists"),
-                    "Pts": st.column_config.NumberColumn("Pts", help="Current Points"),
-                    "ROS_Pts": st.column_config.NumberColumn("ROS Pts", help="Projected Points"),
+                    "G": st.column_config.NumberColumn("G", help="Current Goals"), "ROS_G": st.column_config.NumberColumn("ROS G", help="Projected Goals"),
+                    "A": st.column_config.NumberColumn("A", help="Current Assists"), "ROS_A": st.column_config.NumberColumn("ROS A", help="Projected Assists"),
+                    "Pts": st.column_config.NumberColumn("Pts", help="Current Points"), "ROS_Pts": st.column_config.NumberColumn("ROS Pts", help="Projected Points"),
                 }
-
                 current_stats = ['G', 'A', 'Pts', 'PPP', 'SOG', 'Hits', 'BkS']
                 valid_current = [c for c in current_stats if c in final_cols]
                 proj_stats = [c for c in final_cols if 'ROS_' in c or 'FP' in c]
-                
-                styled_player_table = full_list[final_cols].style \
-                    .format("{:.0f}", subset=valid_current) \
-                    .format("{:.1f}", subset=proj_stats)
-
+                styled_player_table = full_list[final_cols].style.format("{:.0f}", subset=valid_current).format("{:.1f}", subset=proj_stats)
                 st.dataframe(styled_player_table, use_container_width=True, hide_index=True, column_config=trade_config)
 
     # ================= TAB 4: MY ROSTER =================
