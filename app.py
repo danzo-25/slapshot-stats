@@ -28,7 +28,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-with st.spinner('Loading NHL Data (Summary + Advanced)...'):
+with st.spinner('Loading NHL Data...'):
     df = load_nhl_data()
 
 if df.empty:
@@ -112,29 +112,69 @@ else:
         st.divider()
         st.subheader("League Summary Table")
         
-        # --- ADVANCED COLUMN CONFIG ---
+        # --- FANTASY POINTS CALCULATOR ---
+        with st.expander("⚙️ Fantasy Point Settings (Click to Edit)", expanded=False):
+            st.caption("Adjust these values to match your league scoring.")
+            c_s1, c_s2, c_s3, c_s4, c_s5, c_s6 = st.columns(6)
+            c_g1, c_g2, c_g3, c_g4, c_g5, c_g6 = st.columns(6)
+
+            # Skater Inputs
+            val_G = c_s1.number_input("Goals", value=2.0)
+            val_A = c_s2.number_input("Assists", value=1.0)
+            val_PPP = c_s3.number_input("PPP", value=0.5)
+            val_SHP = c_s4.number_input("SHP", value=0.5)
+            val_SOG = c_s5.number_input("SOG", value=0.1)
+            val_Hit = c_s6.number_input("Hits", value=0.1)
+
+            # Goalie/Defense Inputs
+            val_BkS = c_g1.number_input("Blocks", value=0.5)
+            val_W = c_g2.number_input("Wins", value=4.0)
+            val_GA = c_g3.number_input("GA", value=-2.0)
+            val_Svs = c_g4.number_input("Saves", value=0.2)
+            val_SO = c_g5.number_input("Shutouts", value=3.0)
+            val_OTL = c_g6.number_input("OTL", value=1.0)
+
+        # CALCULATE FP COLUMN
+        df['FP'] = (
+            (df['G'] * val_G) + 
+            (df['A'] * val_A) + 
+            (df['PPP'] * val_PPP) + 
+            (df['SHP'] * val_SHP) + 
+            (df['SOG'] * val_SOG) + 
+            (df['Hits'] * val_Hit) + 
+            (df['BkS'] * val_BkS) + 
+            (df['W'] * val_W) + 
+            (df['GA'] * val_GA) + 
+            (df['Svs'] * val_Svs) + 
+            (df['SO'] * val_SO) + 
+            (df['OTL'] * val_OTL)
+        ).round(1)
+
+        # Reorder to put FP first
+        cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType']]
+        df = df[cols]
+
         column_config = {
             "ID": None,
             "Player": st.column_config.TextColumn("Player", pinned=True),
+            "FP": st.column_config.NumberColumn("FP", help="Fantasy Points (Based on Custom Settings)", format="%.1f"),
             "Team": st.column_config.TextColumn("Team"),
             "Pos": st.column_config.TextColumn("Pos"),
-            # Basic Stats
             "GP": st.column_config.NumberColumn("GP", help="Games Played"),
             "G": st.column_config.NumberColumn("G", help="Goals"),
             "A": st.column_config.NumberColumn("A", help="Assists"),
             "Pts": st.column_config.NumberColumn("Pts", help="Points"),
             "PPP": st.column_config.NumberColumn("PPP", help="Power Play Points"),
+            "SHP": st.column_config.NumberColumn("SHP", help="Shorthanded Points"),
             "SOG": st.column_config.NumberColumn("SOG", help="Shots on Goal"),
-            # Advanced Skater Stats
-            "Hits": st.column_config.NumberColumn("Hits", help="Total Hits"),
+            "Hits": st.column_config.NumberColumn("Hits", help="Hits"),
             "BkS": st.column_config.NumberColumn("BkS", help="Blocked Shots"),
-            "SAT%": st.column_config.NumberColumn("SAT%", help="Corsi % (Shot Attempts For / Total Attempts). >50% means team controls puck.", format="%.1f%%"),
-            "USAT%": st.column_config.NumberColumn("USAT%", help="Fenwick % (Unblocked Shot Attempts).", format="%.1f%%"),
-            # Goalie Stats
+            "SAT%": st.column_config.NumberColumn("SAT%", help="Corsi %", format="%.1f%%"),
+            "USAT%": st.column_config.NumberColumn("USAT%", help="Fenwick %", format="%.1f%%"),
             "W": st.column_config.NumberColumn("W", help="Wins"),
-            "SV%": st.column_config.NumberColumn("SV%", help="Save Percentage", format="%.3f"),
-            "GAA": st.column_config.NumberColumn("GAA", help="Goals Against Average", format="%.2f"),
-            "GSAA": st.column_config.NumberColumn("GSAA", help="Goals Saved Above Average (Calculated vs League Avg)", format="%.2f"),
+            "SV%": st.column_config.NumberColumn("SV%", format="%.3f"),
+            "GAA": st.column_config.NumberColumn("GAA", format="%.2f"),
+            "GSAA": st.column_config.NumberColumn("GSAA", format="%.2f"),
             "TOI": st.column_config.TextColumn("TOI")
         }
 
@@ -175,7 +215,9 @@ else:
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Goals", int(team_df['G'].sum()))
             c2.metric("Points", int(team_df['Pts'].sum()))
-            c3.metric("Goalie Wins", int(team_df['W'].sum()))
-            c4.metric("Goalie SO", int(team_df['SO'].sum()))
+            # NEW: Add Team Fantasy Points
+            total_fp = team_df['FP'].sum() if 'FP' in team_df.columns else 0
+            c3.metric("Total FP", f"{total_fp:,.1f}")
+            c4.metric("Goalie Wins", int(team_df['W'].sum()))
             
             st.dataframe(team_df, use_container_width=True, hide_index=True, column_config=column_config)
