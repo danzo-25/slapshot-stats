@@ -30,12 +30,11 @@ def load_nhl_data():
 
         df = pd.DataFrame(players_list)
 
-        # --- FIX IS HERE ---
-        # The Stats API uses 'teamAbbrevs' (plural) because players can change teams
+        # 1. Update Rename Map with NEW stats
         rename_map = {
             'skaterFullName': 'Player',
-            'teamAbbrevs': 'Team',   # <--- This is the correct key
-            'teamAbbrev': 'Team',    # Keeping this just in case
+            'teamAbbrevs': 'Team',
+            'teamAbbrev': 'Team',
             'positionCode': 'Pos',
             'gamesPlayed': 'GP',
             'goals': 'G',
@@ -44,6 +43,10 @@ def load_nhl_data():
             'plusMinus': '+/-',
             'penaltyMinutes': 'PIM',
             'ppPoints': 'PPP',
+            'ppGoals': 'PPG',            # New
+            'shPoints': 'SHP',           # New
+            'gameWinningGoals': 'GWG',   # New
+            'timeOnIcePerGame': 'TOI',   # New
             'shots': 'SOG',
             'shootingPct': 'Sh%',
             'faceoffWinPct': 'FO%'
@@ -52,26 +55,25 @@ def load_nhl_data():
 
         # Safety Checks
         if 'Team' not in df.columns:
-            # If still missing, we try to construct it or default to N/A
             df['Team'] = 'N/A'
-        
         if 'Pos' not in df.columns:
             df['Pos'] = 'N/A'
-            
         if 'Player' not in df.columns:
             df['Player'] = 'Unknown'
 
-        # Ensure Numeric Columns
-        numeric_cols = ['GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'SOG', 'Sh%', 'FO%']
+        # Ensure Numeric Columns (TOI is a string like "20:15", so we skip it here)
+        numeric_cols = ['GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'PPG', 'SHP', 'GWG', 'SOG', 'Sh%', 'FO%']
+        
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             else:
                 df[col] = 0
 
-        cols_to_keep = ['Player', 'Team', 'Pos'] + numeric_cols
+        # Select Columns
+        cols_to_keep = ['Player', 'Team', 'Pos', 'GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'PPG', 'SHP', 'GWG', 'SOG', 'Sh%', 'FO%', 'TOI']
         
-        # Final safety: only return columns that actually exist
+        # Final safety
         final_cols = [c for c in cols_to_keep if c in df.columns]
         return df[final_cols]
 
