@@ -116,8 +116,6 @@ def get_player_game_log(player_id):
         return df_log.sort_values(by='gameDate')
     except: return pd.DataFrame()
 
-# --- SCHEDULE FETCHER (Now with Live Scores) ---
-# Low TTL (60 seconds) so live scores update frequently
 @st.cache_data(ttl=60)
 def load_schedule():
     url = "https://api-web.nhle.com/v1/schedule/now"
@@ -135,27 +133,20 @@ def load_schedule():
         
         processed_games = []
         for g in todays_games:
-            # Time Calc
             utc_time = datetime.strptime(g['startTimeUTC'], "%Y-%m-%dT%H:%M:%SZ")
             utc_time = utc_time.replace(tzinfo=pytz.utc)
             est_time = utc_time.astimezone(pytz.timezone('US/Eastern'))
             
-            # --- LIVE SCORE LOGIC ---
-            game_state = g.get('gameState', 'FUT') # FUT, PRE, LIVE, CRIT, OFF, FINAL
-            
-            # Default: Show Time
+            game_state = g.get('gameState', 'FUT')
             status_text = est_time.strftime("%I:%M %p EST")
             is_live = False
             
             if game_state in ['LIVE', 'CRIT']:
-                # GAME IS LIVE
                 home_score = g['homeTeam'].get('score', 0)
                 away_score = g['awayTeam'].get('score', 0)
                 status_text = f"LIVE: {away_score} - {home_score}"
                 is_live = True
-                
             elif game_state in ['OFF', 'FINAL']:
-                # GAME IS OVER
                 home_score = g['homeTeam'].get('score', 0)
                 away_score = g['awayTeam'].get('score', 0)
                 status_text = f"Final: {away_score} - {home_score}"
@@ -230,18 +221,28 @@ def _get_weekly_schedule_matrix_impl():
     except:
         return pd.DataFrame(), {}
 
+# --- NEW: Enhanced News Fetcher ---
 @st.cache_data(ttl=3600)
 def load_nhl_news():
+    """Fetches top news from ESPN and extracts images."""
     url = "http://site.api.espn.com/apis/site/v2/sports/hockey/nhl/news"
     try:
         response = requests.get(url, timeout=5)
         data = response.json()
         articles = []
-        for article in data.get('articles', [])[:6]: 
+        
+        for article in data.get('articles', [])[:7]: # Get top 7
+            # Extract Image
+            img_url = ""
+            if 'images' in article and len(article['images']) > 0:
+                img_url = article['images'][0].get('url', '')
+            
             articles.append({
                 "headline": article.get('headline', 'No Headline'),
                 "description": article.get('description', ''),
-                "link": article['links']['web']['href'] if 'links' in article else '#'
+                "link": article['links']['web']['href'] if 'links' in article else '#',
+                "image": img_url
             })
         return articles
-    except: return []
+    except Exception as e:
+        return []
