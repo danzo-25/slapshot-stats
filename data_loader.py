@@ -47,7 +47,7 @@ def load_nhl_data():
             'playerId': 'ID', 'skaterFullName': 'Player', 'teamAbbrevs': 'Team', 'positionCode': 'Pos',
             'gamesPlayed': 'GP', 'goals': 'G', 'assists': 'A', 'points': 'Pts',
             'plusMinus': '+/-', 'penaltyMinutes': 'PIM', 'ppPoints': 'PPP', 
-            'shPoints': 'SHP',  # <--- NEW: Shorthanded Points
+            'shPoints': 'SHP',  # <--- CRITICAL FIX: Adds SHP column
             'gameWinningGoals': 'GWG', 'shots': 'SOG', 'shootingPct': 'Sh%', 
             'faceoffWinPct': 'FO%', 'timeOnIcePerGame': 'TOI'
         }
@@ -77,7 +77,7 @@ def load_nhl_data():
             'gamesPlayed': 'GP', 'wins': 'W', 'losses': 'L', 'otLosses': 'OTL',
             'goalsAgainstAverage': 'GAA', 'savePct': 'SV%', 'shutouts': 'SO',
             'shotsAgainst': 'SA', 'saves': 'Svs', 
-            'goalsAgainst': 'GA', # <--- NEW: Goals Against (Raw count)
+            'goalsAgainst': 'GA', # <--- CRITICAL FIX: Adds GA column
             'goals': 'G', 'assists': 'A', 'points': 'Pts', 'penaltyMinutes': 'PIM', 'timeOnIcePerGame': 'TOI'
         })
         
@@ -104,7 +104,7 @@ def load_nhl_data():
     
     df_combined['Player'] = df_combined['Player'].fillna('Unknown')
     
-    # Fill Numeric
+    # Fill Numeric (Safety check ensures all columns exist)
     numeric_cols = ['GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'SHP', 'GWG', 'SOG', 'Sh%', 'FO%', 
                     'Hits', 'BkS', 'SAT%', 'USAT%', 
                     'W', 'L', 'OTL', 'GAA', 'SV%', 'SO', 'GSAA', 'GA', 'Svs']
