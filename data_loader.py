@@ -4,72 +4,68 @@ import streamlit as st
 
 def load_nhl_data():
     """
-    Fetches 2024-2025 stats from the NEW NHL V1 API.
-    Endpoint: https://api-web.nhle.com/v1/skater-stats-leaders/current
+    Fetches 2024-2025 Regular Season stats for all skaters.
+    Endpoint: https://api.nhle.com/stats/rest/en/skater/summary
     """
-    # This is the new, stable endpoint used by the official NHL website
-    url = "https://api-web.nhle.com/v1/skater-stats-leaders/current"
-    
-    # We request 'points' to get the leaderboard sorted by points
-    # limit=-1 fetches ALL active players
+    # This is the endpoint used by the official NHL.com/stats page
+    url = "https://api.nhle.com/stats/rest/en/skater/summary"
+
+    # params to get all players (limit=-1) for current season (20242025) and regular season (gameTypeId=2)
     params = {
-        "categories": "points",
-        "limit": -1
+        "isAggregate": "false",
+        "isGame": "false",
+        "sort": '[{"property":"points","direction":"DESC"}]',
+        "start": 0,
+        "limit": -1,
+        "cayenneExp": "seasonId=20242025 and gameTypeId=2"
     }
 
     try:
-        response = requests.get(url, params=params, timeout=5)
+        response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         
         data = response.json()
-        
-        # The new API nests the data under the category name "points"
-        players_list = data.get("points", [])
-        
+        players_list = data.get("data", [])
+
         if not players_list:
             return pd.DataFrame()
 
         df = pd.DataFrame(players_list)
 
-        # --- FIX STARTS HERE ---
-        # The API returns names as dictionaries: {'default': 'Connor'}
-        # We must extract the 'default' value from the dictionary object.
-        if 'firstName' in df.columns:
-            df['firstName'] = df['firstName'].apply(lambda x: x.get('default') if isinstance(x, dict) else x)
-        
-        if 'lastName' in df.columns:
-            df['lastName'] = df['lastName'].apply(lambda x: x.get('default') if isinstance(x, dict) else x)
-
-        # Now we can safely combine them
-        df['Player'] = df['firstName'] + ' ' + df['lastName']
-        # --- FIX ENDS HERE ---
+        # 1. Clean up Player Name (The Stats API uses 'skaterFullName')
+        df['Player'] = df['skaterFullName']
 
         # 2. Rename columns to standard Fantasy Hockey terms
-        # Note: 'teamAbbrev' is the key in the new API
         df = df.rename(columns={
             'teamAbbrev': 'Team',
-            'positionCode': 'Pos',  # Note: API usually uses 'positionCode', fallback if 'position' is missing
-            'position': 'Pos',      # Some endpoints use 'position', keeping both for safety
+            'positionCode': 'Pos',
             'gamesPlayed': 'GP',
             'goals': 'G',
             'assists': 'A',
             'points': 'Pts',
             'plusMinus': '+/-',
-            'pim': 'PIM',
-            'powerPlayPoints': 'PPP',
+            'penaltyMinutes': 'PIM',
+            'ppPoints': 'PPP',
             'shots': 'SOG',
             'shootingPct': 'Sh%',
             'faceoffWinPct': 'FO%'
         })
 
-        # 3. Select only the columns we need
-        cols_to_keep = ['Player', 'Team', 'Pos', 'GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'SOG', 'Sh%', 'FO%']
+        # 3. Ensure numeric columns are actually numbers (for sorting)
+        numeric_cols = ['GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'SOG', 'Sh%', 'FO%']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
+        # 4. Select and Reorder columns
+        cols_to_keep = ['Player', 'Team', 'Pos'] + numeric_cols
         
-        # Safety: only keep columns that actually exist
+        # Safety check to only keep columns that exist
         final_cols = [c for c in cols_to_keep if c in df.columns]
         
         return df[final_cols]
 
     except Exception as e:
-        st.error(f"Error connecting to NHL V1 API: {e}")
+        st.error(f"Error connecting to NHL Stats API: {e}")
         return pd.DataFrame()
+
