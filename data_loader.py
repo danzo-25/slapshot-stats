@@ -7,10 +7,11 @@ import pytz
 # --- GENERIC FETCHER ---
 def fetch_data(endpoint, report_type, sort_key, override_cayenne=None, aggregate=False):
     url = f"https://api.nhle.com/stats/rest/en/{endpoint}/{report_type}"
+    
+    # User specified 2025-2026 Season
     if override_cayenne:
         cayenne_exp = override_cayenne
     else:
-        # User specified 2025-2026 Season
         cayenne_exp = "seasonId=20252026 and gameTypeId=2"
 
     params = {
@@ -70,6 +71,7 @@ def load_nhl_data():
             'goals': 'G', 'assists': 'A', 'points': 'Pts', 'penaltyMinutes': 'PIM', 'timeOnIcePerGame': 'TOI'
         })
         
+        # GSAA Calc
         total_shots = df_goalies['SA'].sum()
         total_saves = df_goalies['Svs'].sum()
         if total_shots > 0:
@@ -84,6 +86,7 @@ def load_nhl_data():
     elif df_goalies.empty: df_combined = df_sum
     else: df_combined = pd.concat([df_sum, df_goalies], ignore_index=True)
 
+    # Clean Data
     if 'Team' in df_combined.columns:
         df_combined['Team'] = df_combined['Team'].apply(lambda x: x.split(',')[-1].strip() if isinstance(x, str) else 'N/A')
     else: df_combined['Team'] = 'N/A'
@@ -104,6 +107,7 @@ def load_nhl_data():
 
 @st.cache_data(ttl=3600)
 def get_player_game_log(player_id):
+    # Using NHL V1 API for game logs
     url = f"https://api-web.nhle.com/v1/player/{player_id}/game-log/20252026/2"
     try:
         response = requests.get(url, timeout=5)
@@ -133,10 +137,12 @@ def load_schedule():
         
         processed_games = []
         for g in todays_games:
+            # Time Calc
             utc_time = datetime.strptime(g['startTimeUTC'], "%Y-%m-%dT%H:%M:%SZ")
             utc_time = utc_time.replace(tzinfo=pytz.utc)
             est_time = utc_time.astimezone(pytz.timezone('US/Eastern'))
             
+            # --- LIVE SCORE LOGIC ---
             game_state = g.get('gameState', 'FUT')
             status_text = est_time.strftime("%I:%M %p EST")
             is_live = False
@@ -221,7 +227,6 @@ def _get_weekly_schedule_matrix_impl():
     except:
         return pd.DataFrame(), {}
 
-# --- NEW: Enhanced News Fetcher ---
 @st.cache_data(ttl=3600)
 def load_nhl_news():
     """Fetches top news from ESPN and extracts images."""
@@ -231,8 +236,7 @@ def load_nhl_news():
         data = response.json()
         articles = []
         
-        for article in data.get('articles', [])[:7]: # Get top 7
-            # Extract Image
+        for article in data.get('articles', [])[:7]:
             img_url = ""
             if 'images' in article and len(article['images']) > 0:
                 img_url = article['images'][0].get('url', '')
@@ -246,3 +250,55 @@ def load_nhl_news():
         return articles
     except Exception as e:
         return []
+
+# --- NEW ESPN LEAGUE FETCHER ---
+@st.cache_data(ttl=60) # Cache for 60 seconds to prevent hammering API
+def fetch_espn_roster_data(league_id, season_year):
+    """
+    Fetches ESPN league roster data using the League ID.
+    Returns: {Team Abbr: [Player Names]} and Status
+    """
+    # Use 2026 for 2025-2026 season data
+    url = f"https://fantasy.espn.com/apis/v3/games/fhl/seasons/{season_year}/segments/0/leagues/{league_id}"
+    
+    # Required parameters for getting roster data
+    params = {
+        'view': 'mRoster,mSettings',
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        
+        if response.status_code == 401:
+            # 401 Unauthorized usually means the league is private
+            return {}, 'PRIVATE'
+        
+        response.raise_for_status() # Raise error for bad status codes (e.g., 404)
+        data = response.json()
+        
+    except requests.RequestException:
+        # Handles connection errors, timeouts, 404s, etc.
+        return {}, 'FAILED_FETCH'
+
+    roster_data = {}
+    
+    # 1. Get Team Names and IDs
+    # Mapping member ID to team ID to team abbreviation
+    member_to_team = {m['id']: m.get('displayName', f"T{m['id']}") for m in data.get('members', [])}
+    
+    # 2. Extract Rosters
+    for team in data.get('teams', []):
+        member_id = team.get('primaryOwner')
+        # Use team abbreviation if available, fallback to member name
+        team_abbr = team.get('abbrev', member_to_team.get(member_id, f"T{team.get('id')}"))
+
+        roster_data[team_abbr] = []
+        
+        for slot in team.get('roster', {}).get('entries', []):
+            player_info = slot.get('playerPoolEntry', {}).get('player', {})
+            full_name = player_info.get('fullName')
+            if full_name:
+                roster_data[team_abbr].append(full_name)
+
+    return roster_data, 'SUCCESS'
+
