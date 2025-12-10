@@ -39,11 +39,28 @@ st.markdown("""
     .team-name { font-weight: 900; font-size: 1em; margin-top: -2px; }
     .vs-text { font-size: 1em; font-weight: bold; color: #888; padding-top: 5px; }
     .game-time { margin-top: 5px; font-weight: bold; color: #FF4B4B; font-size: 0.9em; border-top: 1px solid #41444e; padding-top: 2px; }
+    .game-live { margin-top: 5px; font-weight: bold; color: #ff4b4b; font-size: 1.0em; border-top: 1px solid #41444e; padding-top: 2px; animation: pulse 2s infinite; }
+    
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.7; }
+        100% { opacity: 1; }
+    }
+
     .news-card { background-color: #1e1e1e; border-left: 4px solid #0083b8; padding: 10px; margin-bottom: 10px; border-radius: 4px; }
     .news-title { font-weight: bold; font-size: 1.05em; color: #fff; text-decoration: none; }
     .news-desc { font-size: 0.9em; color: #ccc; margin-top: 5px; }
     .trade-win { background-color: rgba(76, 175, 80, 0.15); border: 2px solid #4caf50; padding: 15px; border-radius: 8px; text-align: center; }
     .trade-loss { background-color: rgba(244, 67, 54, 0.15); border: 2px solid #f44336; padding: 15px; border-radius: 8px; text-align: center; }
+    
+    /* SELECTED PLAYER CARD STYLING */
+    .selected-player-card {
+        background-color: #333;
+        border: 1px solid #555;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 8px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -95,6 +112,9 @@ else:
                     if i + j < len(schedule):
                         game = schedule[i+j]
                         with cols[j]:
+                            # CSS Class changes if LIVE
+                            status_class = "game-live" if game.get("is_live") else "game-time"
+                            
                             st.markdown(f"""
                             <div class="game-card">
                                 <div class="team-row">
@@ -102,7 +122,7 @@ else:
                                     <div class="vs-text">@</div>
                                     <div class="team-info"><img src="{game['home_logo']}" class="team-logo"><div class="team-name">{game['home']}</div></div>
                                 </div>
-                                <div class="game-time">{game['time']}</div>
+                                <div class="{status_class}">{game['time']}</div>
                             </div>""", unsafe_allow_html=True)
         st.divider()
         col_sos, col_news = st.columns([2, 1])
@@ -174,27 +194,23 @@ else:
         st.header("⚖️ Trade Analyzer")
         st.info("Compare players based on current stats and **Rest of Season (ROS)** projections.")
         
-        # --- SAFE PLAYER LIST CREATION ---
-        # This fixes the blank page crash if data is messy
+        # SAFE PLAYER LIST (PREVENT CRASH)
         if 'Player' in df.columns:
             all_players = sorted(df['Player'].dropna().astype(str).unique().tolist())
         else:
             all_players = []
-            st.error("Player data not found. Please check data source.")
+            st.error("Player data not found.")
 
-        # --- HELPER: PLAYER CARD DISPLAY ---
+        # --- PLAYER CARD HELPER ---
         def show_selected_player_card(player_name, side):
             p_data = df[df['Player'] == player_name].iloc[0]
             pid = p_data['ID']
             team = p_data['Team']
-            # CURRENT SEASON ASSETS (20252026)
-            img_url = f"https://assets.nhle.com/mugs/nhl/20252026/{team}/{pid}.png"
+            img_url = f"https://assets.nhle.com/mugs/nhl/20242025/{team}/{pid}.png"
             
             with st.container(border=True):
                 r1, r2, r3, r4 = st.columns([0.25, 0.35, 0.3, 0.1])
-                with r1: 
-                    # Use a fallback error handling for image if 20252026 doesn't exist yet on server
-                    st.image(img_url, width=60)
+                with r1: st.image(img_url, width=60)
                 with r2:
                     st.markdown(f"**{player_name}**")
                     st.caption(f"{p_data['Team']} • {p_data['Pos']}")
@@ -260,7 +276,7 @@ else:
             styled_summary = summary_df.style.format("{:+.1f}", subset=['Net']).format("{:.1f}", subset=['Sending', 'Receiving']).apply(highlight_winner, axis=1)
             st.dataframe(styled_summary, use_container_width=True)
 
-            # --- INDIVIDUAL PLAYERS (With Tooltips) ---
+            # INDIVIDUAL PLAYERS
             st.caption("Individual Player Stats (Current & Projected)")
             full_list = pd.concat([df_send, df_recv])
             if not full_list.empty:
@@ -294,12 +310,7 @@ else:
                     .format("{:.0f}", subset=valid_current) \
                     .format("{:.1f}", subset=proj_stats)
 
-                st.dataframe(
-                    styled_player_table, 
-                    use_container_width=True, 
-                    hide_index=True,
-                    column_config=trade_config
-                )
+                st.dataframe(styled_player_table, use_container_width=True, hide_index=True, column_config=trade_config)
 
     # ================= TAB 4: MY ROSTER =================
     with tab_fantasy:
@@ -328,4 +339,3 @@ else:
             styled_team = styled_team.format("{:.1f}", subset=['FP'])
             cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining']]
             st.dataframe(styled_team, use_container_width=True, hide_index=True, column_order=cols)
-
