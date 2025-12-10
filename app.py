@@ -1,20 +1,3 @@
-This is a great addition. In Fantasy Hockey, goalies are crucial!
-
-Because skaters and goalies have completely different stats (Goals/Assists vs. Wins/Saves), we need to fetch data from two different API endpoints and then merge them together carefully so they can coexist in your app.
-
-Here is the plan:
-
-    Update data_loader.py: Fetch both Skaters and Goalies. Combine them into one big list. Skaters will have 0 for Wins, and Goalies will have 0 for Goals.
-
-    Update app.py: Add columns for Wins (W), Goals Against Average (GAA), Save Percentage (SV%), and Shutouts (SO). Update the "Team Totals" to count Wins too.
-
-Step 1: Update data_loader.py
-
-This version runs two API calls and merges the results.
-
-Replace data_loader.py with this:
-Python
-
 import requests
 import pandas as pd
 import streamlit as st
@@ -314,4 +297,5 @@ else:
             )
         else:
             st.info("Start by adding players or uploading a saved roster.")
+
 
