@@ -58,7 +58,6 @@ else:
             val_OTL = st.number_input("OTL", value=1.0)
 
     # --- CALCULATE FP GLOBALLY ---
-    # We do this here so 'FP' is available in ALL tabs (Trade Analyzer, Analytics, Roster)
     df['FP'] = (
         (df['G'] * val_G) + (df['A'] * val_A) + (df['PPP'] * val_PPP) + 
         (df['SHP'] * val_SHP) + (df['SOG'] * val_SOG) + (df['Hits'] * val_Hit) + 
@@ -67,8 +66,6 @@ else:
     ).round(1)
 
     # --- CALCULATE ROS (Rest of Season) PROJECTIONS ---
-    # Formula: (Current Stat / GP) * (82 - GP)
-    # We add this as a hidden column for the trade analyzer to use
     df['GamesRemaining'] = 82 - df['GP']
     df['ROS_FP'] = (df['FP'] / df['GP']).fillna(0) * df['GamesRemaining']
 
@@ -203,13 +200,32 @@ else:
         # Layout: Two Columns for Input
         c1, c_mid, c2 = st.columns([1, 0.2, 1])
         
+        # Get all players
+        all_players = df['Player'].unique().tolist()
+
+        # Initialize session state for selected players if not present
+        if 'send' not in st.session_state: st.session_state.send = []
+        if 'recv' not in st.session_state: st.session_state.recv = []
+
+        # Dynamic options: remove players selected in the *other* box
+        sending_options = [p for p in all_players if p not in st.session_state.recv]
+        receiving_options = [p for p in all_players if p not in st.session_state.send]
+
         with c1:
             st.subheader("📤 Sending (Your Team)")
-            sending = st.multiselect("Select Players to Trade Away", df['Player'].unique(), key="send")
+            sending = st.multiselect(
+                "Select Players to Trade Away", 
+                options=sending_options, 
+                key="send"
+            )
             
         with c2:
             st.subheader("📥 Receiving (Their Team)")
-            receiving = st.multiselect("Select Players to Receive", df['Player'].unique(), key="recv")
+            receiving = st.multiselect(
+                "Select Players to Receive", 
+                options=receiving_options, 
+                key="recv"
+            )
 
         if sending and receiving:
             st.divider()
@@ -226,7 +242,6 @@ else:
             # --- THE VERDICT ---
             st.subheader("The Verdict")
             
-            # Determine color and message
             if diff > 0:
                 st.markdown(f"""
                 <div class="trade-win">
@@ -247,12 +262,9 @@ else:
             # --- STAT IMPACT TABLE ---
             st.markdown("#### Projected Net Impact (Rest of Season)")
             
-            # Helper to calculate ROS sum for a specific stat column
             def get_ros_sum(dataframe, col):
-                # (Stat / GP) * Remaining Games
                 return ((dataframe[col] / dataframe['GP']) * dataframe['GamesRemaining']).sum()
 
-            # Stats to compare
             stat_list = ['G', 'A', 'PPP', 'SOG', 'Hits', 'BkS']
             impact_data = {}
             
@@ -262,28 +274,41 @@ else:
                 net = val_recv - val_send
                 impact_data[stat] = net
 
-            # Display Impact as metrics
             i1, i2, i3, i4, i5, i6 = st.columns(6)
             cols = [i1, i2, i3, i4, i5, i6]
             
             for i, stat in enumerate(stat_list):
                 val = impact_data[stat]
-                cols[i].metric(
-                    label=f"Net {stat}", 
-                    value=f"{val:+.0f}", # Force sign (+/-)
-                    delta_color="normal"
-                )
+                cols[i].metric(label=f"Net {stat}", value=f"{val:+.0f}", delta_color="normal")
 
-            # --- SIDE BY SIDE COMPARISON ---
+            # --- SIDE BY SIDE PLAYER COMPARISON ---
             st.markdown("#### Player Comparison")
-            c_left, c_right = st.columns(2)
             
-            with c_left:
-                st.caption("Sending")
-                st.dataframe(df_send[['Player', 'FP', 'ROS_FP', 'G', 'A']], hide_index=True)
-            with c_right:
-                st.caption("Receiving")
-                st.dataframe(df_recv[['Player', 'FP', 'ROS_FP', 'G', 'A']], hide_index=True)
+            # 1. Combine and set index
+            df_compare = pd.concat([df_send, df_recv])
+            df_compare = df_compare.set_index('Player')
+            
+            # 2. Select relevant stats columns
+            stats_cols = ['G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'PIM', 'FP', 'ROS_FP']
+            
+            # 3. Transpose: Players become columns, Stats become rows
+            df_compare_T = df_compare[stats_cols].T
+            
+            # 4. Styling and Formatting
+            styled_compare = df_compare_T.style
+
+            # Format whole number rows
+            whole_num_rows = ['G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'PIM']
+            valid_whole_rows = [r for r in whole_num_rows if r in df_compare_T.index]
+            styled_compare = styled_compare.format("{:.0f}", subset=pd.IndexSlice[valid_whole_rows, :])
+            
+            # Format decimal rows
+            decimal_rows = ['FP', 'ROS_FP']
+            valid_decimal_rows = [r for r in decimal_rows if r in df_compare_T.index]
+            styled_compare = styled_compare.format("{:.1f}", subset=pd.IndexSlice[valid_decimal_rows, :])
+
+            # Display the transposed, styled dataframe
+            st.dataframe(styled_compare, use_container_width=True)
 
 
     # ================= TAB 4: MY ROSTER =================
