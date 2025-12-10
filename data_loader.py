@@ -4,16 +4,28 @@ import streamlit as st
 from datetime import datetime, timedelta
 import pytz
 
-def fetch_data(endpoint, sort_key):
-    """Helper to fetch summary data"""
+def fetch_data(endpoint, sort_key, override_cayenne=None, aggregate=False):
+    """
+    Helper to fetch summary data.
+    - override_cayenne: If set, replaces the default seasonId filter completely.
+    - aggregate: If True, tells API to sum up the stats (isAggregate=true).
+    """
     url = f"https://api.nhle.com/stats/rest/en/{endpoint}/summary"
+    
+    # LOGIC FIX: If we have a custom filter (like weekly dates), use that.
+    # Otherwise, default to the full 2025-2026 Season.
+    if override_cayenne:
+        cayenne_exp = override_cayenne
+    else:
+        cayenne_exp = "seasonId=20252026 and gameTypeId=2"
+
     params = {
-        "isAggregate": "false",
+        "isAggregate": "true" if aggregate else "false",
         "isGame": "false",
         "sort": f'[{{"property":"{sort_key}","direction":"DESC"}}]',
         "start": 0,
-        "limit": 50, # Get top 50 to ensure we have a good pool
-        "cayenneExp": "seasonId=20252026 and gameTypeId=2"
+        "limit": 50,
+        "cayenneExp": cayenne_exp
     }
     try:
         response = requests.get(url, params=params, timeout=10)
@@ -26,6 +38,7 @@ def fetch_data(endpoint, sort_key):
 
 def load_nhl_data():
     """Fetches Season Summary for Skaters and Goalies (Full Season)."""
+    # 1. Fetch Skaters
     df_skaters = fetch_data("skater", "points")
     if not df_skaters.empty:
         df_skaters['PosType'] = 'Skater'
@@ -37,6 +50,7 @@ def load_nhl_data():
             'faceoffWinPct': 'FO%', 'timeOnIcePerGame': 'TOI'
         })
 
+    # 2. Fetch Goalies
     df_goalies = fetch_data("goalie", "wins")
     if not df_goalies.empty:
         df_goalies['PosType'] = 'Goalie'
@@ -53,6 +67,7 @@ def load_nhl_data():
     elif df_goalies.empty: df_combined = df_skaters
     else: df_combined = pd.concat([df_skaters, df_goalies], ignore_index=True)
 
+    # Clean Data
     if 'Team' in df_combined.columns:
         df_combined['Team'] = df_combined['Team'].apply(lambda x: x.split(',')[-1].strip() if isinstance(x, str) else 'N/A')
     else: df_combined['Team'] = 'N/A'
@@ -114,52 +129,25 @@ def load_schedule():
         return processed_games
     except: return []
 
-def get_weekly_hot_players():
-    """
-    Robust Method:
-    1. Gets top 20 scorers from season list.
-    2. Fetches their game logs.
-    3. Calculates their stats for Last 7 Days manually.
-    """
-    # 1. Get Top Players (Base Pool)
-    df_all = load_nhl_data()
-    if df_all.empty: return pd.DataFrame()
-    
-    # Filter to Skaters only and take top 20 by Points
-    top_candidates = df_all[df_all['PosType'] == 'Skater'].sort_values('Pts', ascending=False).head(20)
-    
-    # 2. Date Range
+def load_weekly_leaders():
+    """Fetches top performers for the last 7 days using API Aggregation."""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=7)
     
-    hot_list = []
+    # CRITICAL FIX: Only filter by Date and GameType. Do NOT include seasonId.
+    clean_date_filter = f"gameTypeId=2 and gameDate >= '{start_date.strftime('%Y-%m-%d')}' and gameDate <= '{end_date.strftime('%Y-%m-%d')}'"
     
-    # 3. Iterate and Fetch Logs
-    for _, player in top_candidates.iterrows():
-        pid = player['ID']
-        logs = get_player_game_log(pid)
-        
-        if not logs.empty:
-            # Filter logs for last 7 days
-            recent_logs = logs[
-                (logs['gameDate'] >= start_date) & 
-                (logs['gameDate'] <= end_date)
-            ]
-            
-            if not recent_logs.empty:
-                # Sum up stats
-                hot_list.append({
-                    'Player': player['Player'],
-                    'G': recent_logs['goals'].sum(),
-                    'A': recent_logs['assists'].sum(),
-                    'Pts': recent_logs['points'].sum(),
-                    'SOG': recent_logs['shots'].sum(),
-                    'PPP': recent_logs['powerPlayPoints'].sum()
-                })
+    # Call fetch_data with override_cayenne to use ONLY our date filter
+    df = fetch_data("skater", "points", override_cayenne=clean_date_filter, aggregate=True)
     
-    if not hot_list: return pd.DataFrame()
-    
-    return pd.DataFrame(hot_list)
+    if df.empty: return pd.DataFrame()
+
+    rename_map = {
+        'skaterFullName': 'Player', 'teamAbbrevs': 'Team', 'positionCode': 'Pos',
+        'goals': 'G', 'assists': 'A', 'points': 'Pts', 'shots': 'SOG', 'ppPoints': 'PPP'
+    }
+    df = df.rename(columns=rename_map)
+    return df
 
 
 
