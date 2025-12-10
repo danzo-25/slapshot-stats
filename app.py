@@ -6,6 +6,11 @@ from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_
 st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
 st.title("🏒 NHL 2025-26 Dashboard")
 
+# --- INITIALIZE SESSION STATE ---
+# This allows the roster to persist between tabs
+if 'my_roster' not in st.session_state:
+    st.session_state.my_roster = []
+
 # --- CUSTOM CSS ---
 st.markdown("""
 <style>
@@ -112,13 +117,12 @@ else:
         st.divider()
         st.subheader("League Summary Table")
         
-        # --- FANTASY POINTS CALCULATOR ---
+        # --- FP CALCULATOR ---
         with st.expander("⚙️ Fantasy Point Settings (Click to Edit)", expanded=False):
             st.caption("Adjust these values to match your league scoring.")
             c_s1, c_s2, c_s3, c_s4, c_s5, c_s6 = st.columns(6)
             c_g1, c_g2, c_g3, c_g4, c_g5, c_g6 = st.columns(6)
 
-            # Skater Inputs
             val_G = c_s1.number_input("Goals", value=2.0)
             val_A = c_s2.number_input("Assists", value=1.0)
             val_PPP = c_s3.number_input("PPP", value=0.5)
@@ -126,7 +130,6 @@ else:
             val_SOG = c_s5.number_input("SOG", value=0.1)
             val_Hit = c_s6.number_input("Hits", value=0.1)
 
-            # Goalie/Defense Inputs
             val_BkS = c_g1.number_input("Blocks", value=0.5)
             val_W = c_g2.number_input("Wins", value=4.0)
             val_GA = c_g3.number_input("GA", value=-2.0)
@@ -134,41 +137,32 @@ else:
             val_SO = c_g5.number_input("Shutouts", value=3.0)
             val_OTL = c_g6.number_input("OTL", value=1.0)
 
-        # CALCULATE FP COLUMN
+        # CALCULATE FP
         df['FP'] = (
-            (df['G'] * val_G) + 
-            (df['A'] * val_A) + 
-            (df['PPP'] * val_PPP) + 
-            (df['SHP'] * val_SHP) + 
-            (df['SOG'] * val_SOG) + 
-            (df['Hits'] * val_Hit) + 
-            (df['BkS'] * val_BkS) + 
-            (df['W'] * val_W) + 
-            (df['GA'] * val_GA) + 
-            (df['Svs'] * val_Svs) + 
-            (df['SO'] * val_SO) + 
-            (df['OTL'] * val_OTL)
+            (df['G'] * val_G) + (df['A'] * val_A) + (df['PPP'] * val_PPP) + 
+            (df['SHP'] * val_SHP) + (df['SOG'] * val_SOG) + (df['Hits'] * val_Hit) + 
+            (df['BkS'] * val_BkS) + (df['W'] * val_W) + (df['GA'] * val_GA) + 
+            (df['Svs'] * val_Svs) + (df['SO'] * val_SO) + (df['OTL'] * val_OTL)
         ).round(1)
 
-        # Reorder to put FP first
         cols = ['ID', 'Player', 'Team', 'Pos', 'FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType']]
         df = df[cols]
 
         column_config = {
             "ID": None,
             "Player": st.column_config.TextColumn("Player", pinned=True),
-            "FP": st.column_config.NumberColumn("FP", help="Fantasy Points (Based on Custom Settings)", format="%.1f"),
+            "FP": st.column_config.NumberColumn("FP", help="Fantasy Points", format="%.1f"),
             "Team": st.column_config.TextColumn("Team"),
             "Pos": st.column_config.TextColumn("Pos"),
             "GP": st.column_config.NumberColumn("GP", help="Games Played"),
             "G": st.column_config.NumberColumn("G", help="Goals"),
             "A": st.column_config.NumberColumn("A", help="Assists"),
             "Pts": st.column_config.NumberColumn("Pts", help="Points"),
-            "PPP": st.column_config.NumberColumn("PPP", help="Power Play Points"),
-            "SHP": st.column_config.NumberColumn("SHP", help="Shorthanded Points"),
-            "SOG": st.column_config.NumberColumn("SOG", help="Shots on Goal"),
+            "PPP": st.column_config.NumberColumn("PPP", help="PPP"),
+            "SHP": st.column_config.NumberColumn("SHP", help="SHP"),
+            "SOG": st.column_config.NumberColumn("SOG", help="SOG"),
             "Hits": st.column_config.NumberColumn("Hits", help="Hits"),
-            "BkS": st.column_config.NumberColumn("BkS", help="Blocked Shots"),
+            "BkS": st.column_config.NumberColumn("BkS", help="Blocks"),
             "SAT%": st.column_config.NumberColumn("SAT%", help="Corsi %", format="%.1f%%"),
             "USAT%": st.column_config.NumberColumn("USAT%", help="Fenwick %", format="%.1f%%"),
             "W": st.column_config.NumberColumn("W", help="Wins"),
@@ -178,6 +172,7 @@ else:
             "TOI": st.column_config.TextColumn("TOI")
         }
 
+        # Filter
         with st.expander("Filter Options"):
             c1, c2 = st.columns(2)
             with c1:
@@ -190,7 +185,22 @@ else:
         filt_df = df.copy()
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
-        st.dataframe(filt_df, use_container_width=True, hide_index=True, height=600, column_config=column_config)
+
+        # --- HIGHLIGHT LOGIC ---
+        # 1. Define function
+        def highlight_my_team(row):
+            # Check if player is in the session state roster
+            if row['Player'] in st.session_state.my_roster:
+                # Return a 'Gold' background color for that row
+                return ['background-color: #383b22'] * len(row)
+            else:
+                return [''] * len(row)
+
+        # 2. Apply style
+        styled_df = filt_df.style.apply(highlight_my_team, axis=1)
+
+        # 3. Render
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_config=column_config)
 
     # ================= TAB 3: FANTASY =================
     with tab_fantasy:
@@ -199,23 +209,32 @@ else:
         with col_up:
             uploaded_file = st.file_uploader("📂 Load Saved Roster", type=["csv"])
         
-        default_roster = []
+        # LOGIC: Update session state from file
         if uploaded_file:
             try:
                 udf = pd.read_csv(uploaded_file)
-                if "Player" in udf.columns: default_roster = [p for p in udf["Player"] if p in df['Player'].values]
+                if "Player" in udf.columns: 
+                    valid_players = [p for p in udf["Player"] if p in df['Player'].values]
+                    st.session_state.my_roster = valid_players
             except: pass
 
-        my_team = st.multiselect("Search Players:", df['Player'].unique(), default=default_roster)
+        # MULTISELECT (Syncs with session state)
+        selected_players = st.multiselect(
+            "Search Players:", 
+            df['Player'].unique(), 
+            default=st.session_state.my_roster
+        )
+        
+        # Update session state immediately if changed
+        st.session_state.my_roster = selected_players
 
-        if my_team:
-            team_df = df[df['Player'].isin(my_team)]
+        if selected_players:
+            team_df = df[df['Player'].isin(selected_players)]
             st.download_button("💾 Save Roster", team_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
             
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Goals", int(team_df['G'].sum()))
             c2.metric("Points", int(team_df['Pts'].sum()))
-            # NEW: Add Team Fantasy Points
             total_fp = team_df['FP'].sum() if 'FP' in team_df.columns else 0
             c3.metric("Total FP", f"{total_fp:,.1f}")
             c4.metric("Goalie Wins", int(team_df['W'].sum()))
