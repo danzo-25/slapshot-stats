@@ -30,10 +30,12 @@ def load_nhl_data():
 
         df = pd.DataFrame(players_list)
 
+        # --- FIX IS HERE ---
+        # The Stats API uses 'teamAbbrevs' (plural) because players can change teams
         rename_map = {
             'skaterFullName': 'Player',
-            'teamAbbrev': 'Team',
-            'teamName': 'Team',
+            'teamAbbrevs': 'Team',   # <--- This is the correct key
+            'teamAbbrev': 'Team',    # Keeping this just in case
             'positionCode': 'Pos',
             'gamesPlayed': 'GP',
             'goals': 'G',
@@ -50,9 +52,12 @@ def load_nhl_data():
 
         # Safety Checks
         if 'Team' not in df.columns:
+            # If still missing, we try to construct it or default to N/A
             df['Team'] = 'N/A'
+        
         if 'Pos' not in df.columns:
             df['Pos'] = 'N/A'
+            
         if 'Player' not in df.columns:
             df['Player'] = 'Unknown'
 
@@ -65,7 +70,10 @@ def load_nhl_data():
                 df[col] = 0
 
         cols_to_keep = ['Player', 'Team', 'Pos'] + numeric_cols
-        return df[cols_to_keep]
+        
+        # Final safety: only return columns that actually exist
+        final_cols = [c for c in cols_to_keep if c in df.columns]
+        return df[final_cols]
 
     except Exception as e:
         st.error(f"Error connecting to NHL Stats API: {e}")
