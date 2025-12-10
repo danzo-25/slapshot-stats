@@ -4,12 +4,9 @@ import streamlit as st
 from datetime import datetime, timedelta
 import pytz
 
+# --- GENERIC FETCHER ---
 def fetch_data(endpoint, report_type, sort_key, override_cayenne=None, aggregate=False):
-    """
-    Generic fetcher for different report types (summary, realtime, puckPossession).
-    """
     url = f"https://api.nhle.com/stats/rest/en/{endpoint}/{report_type}"
-    
     if override_cayenne:
         cayenne_exp = override_cayenne
     else:
@@ -29,59 +26,48 @@ def fetch_data(endpoint, report_type, sort_key, override_cayenne=None, aggregate
         data = response.json()
         return pd.DataFrame(data.get("data", []))
     except Exception as e:
-        print(f"Error fetching {endpoint}/{report_type}: {e}")
         return pd.DataFrame()
 
+# --- MAIN DATA LOADER ---
 def load_nhl_data():
-    """
-    Fetches stats. RENAMES columns early to prevent duplicates during merge.
-    """
-    # ================= SKATERS =================
+    # 1. Skaters
     df_sum = fetch_data("skater", "summary", "points")
     df_real = fetch_data("skater", "realtime", "hits")
     df_adv = fetch_data("skater", "puckPossession", "satPct")
 
     if not df_sum.empty:
-        # 1. RENAME SKATERS IMMEDIATELY
         rename_skaters = {
             'playerId': 'ID', 'skaterFullName': 'Player', 'teamAbbrevs': 'Team', 'positionCode': 'Pos',
             'gamesPlayed': 'GP', 'goals': 'G', 'assists': 'A', 'points': 'Pts',
             'plusMinus': '+/-', 'penaltyMinutes': 'PIM', 'ppPoints': 'PPP', 
-            'shPoints': 'SHP',  # <--- CRITICAL FIX: Adds SHP column
-            'gameWinningGoals': 'GWG', 'shots': 'SOG', 'shootingPct': 'Sh%', 
+            'shPoints': 'SHP', 'gameWinningGoals': 'GWG', 'shots': 'SOG', 'shootingPct': 'Sh%', 
             'faceoffWinPct': 'FO%', 'timeOnIcePerGame': 'TOI'
         }
         df_sum = df_sum.rename(columns=rename_skaters)
         
-        # 2. Merge Realtime (Hits, Blocks)
         if not df_real.empty:
             df_real = df_real[['playerId', 'hits', 'blockedShots']].rename(columns={'playerId': 'ID', 'hits': 'Hits', 'blockedShots': 'BkS'})
             df_sum = df_sum.merge(df_real, on='ID', how='left')
 
-        # 3. Merge Advanced (Corsi/Fenwick)
         if not df_adv.empty:
             df_adv = df_adv[['playerId', 'satPct', 'usatPct']].rename(columns={'playerId': 'ID', 'satPct': 'SAT%', 'usatPct': 'USAT%'})
             df_sum = df_sum.merge(df_adv, on='ID', how='left')
         
         df_sum['PosType'] = 'Skater'
 
-    # ================= GOALIES =================
+    # 2. Goalies
     df_goalies = fetch_data("goalie", "summary", "wins")
-    
     if not df_goalies.empty:
         df_goalies['PosType'] = 'Goalie'
         df_goalies['Pos'] = 'G'
-        # Rename Goalies to match the standardized keys above
         df_goalies = df_goalies.rename(columns={
             'goalieFullName': 'Player', 'playerId': 'ID', 'teamAbbrevs': 'Team',
             'gamesPlayed': 'GP', 'wins': 'W', 'losses': 'L', 'otLosses': 'OTL',
             'goalsAgainstAverage': 'GAA', 'savePct': 'SV%', 'shutouts': 'SO',
-            'shotsAgainst': 'SA', 'saves': 'Svs', 
-            'goalsAgainst': 'GA', # <--- CRITICAL FIX: Adds GA column
+            'shotsAgainst': 'SA', 'saves': 'Svs', 'goalsAgainst': 'GA',
             'goals': 'G', 'assists': 'A', 'points': 'Pts', 'penaltyMinutes': 'PIM', 'timeOnIcePerGame': 'TOI'
         })
         
-        # Calculate GSAA
         total_shots = df_goalies['SA'].sum()
         total_saves = df_goalies['Svs'].sum()
         if total_shots > 0:
@@ -91,23 +77,19 @@ def load_nhl_data():
         else:
             df_goalies['GSAA'] = 0
 
-    # ================= COMBINE =================
     if df_sum.empty and df_goalies.empty: return pd.DataFrame()
     elif df_sum.empty: df_combined = df_goalies
     elif df_goalies.empty: df_combined = df_sum
     else: df_combined = pd.concat([df_sum, df_goalies], ignore_index=True)
 
-    # Clean Team Names
     if 'Team' in df_combined.columns:
         df_combined['Team'] = df_combined['Team'].apply(lambda x: x.split(',')[-1].strip() if isinstance(x, str) else 'N/A')
     else: df_combined['Team'] = 'N/A'
     
     df_combined['Player'] = df_combined['Player'].fillna('Unknown')
     
-    # Fill Numeric (Safety check ensures all columns exist)
     numeric_cols = ['GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'SHP', 'GWG', 'SOG', 'Sh%', 'FO%', 
-                    'Hits', 'BkS', 'SAT%', 'USAT%', 
-                    'W', 'L', 'OTL', 'GAA', 'SV%', 'SO', 'GSAA', 'GA', 'Svs']
+                    'Hits', 'BkS', 'SAT%', 'USAT%', 'W', 'L', 'OTL', 'GAA', 'SV%', 'SO', 'GSAA', 'GA', 'Svs']
     
     for col in numeric_cols:
         if col not in df_combined.columns: df_combined[col] = 0
@@ -119,7 +101,6 @@ def load_nhl_data():
     return df_combined[final_cols]
 
 def get_player_game_log(player_id):
-    """Fetches game log for trend analysis."""
     url = f"https://api-web.nhle.com/v1/player/{player_id}/game-log/20252026/2"
     try:
         response = requests.get(url, timeout=5)
@@ -133,7 +114,7 @@ def get_player_game_log(player_id):
     except: return pd.DataFrame()
 
 def load_schedule():
-    """Fetches the current week's schedule and filters for Today."""
+    """For the visual card display (today's games only)"""
     url = "https://api-web.nhle.com/v1/schedule/now"
     try:
         response = requests.get(url, timeout=5)
@@ -152,7 +133,6 @@ def load_schedule():
             utc_time = datetime.strptime(g['startTimeUTC'], "%Y-%m-%dT%H:%M:%SZ")
             utc_time = utc_time.replace(tzinfo=pytz.utc)
             est_time = utc_time.astimezone(pytz.timezone('US/Eastern'))
-            
             processed_games.append({
                 "home": g['homeTeam']['abbrev'],
                 "home_logo": g['homeTeam'].get('logo', ''),
@@ -164,17 +144,86 @@ def load_schedule():
     except: return []
 
 def load_weekly_leaders():
-    """Fetches top performers for the last 7 days using API Aggregation."""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=7)
     clean_date_filter = f"gameTypeId=2 and gameDate >= '{start_date.strftime('%Y-%m-%d')}' and gameDate <= '{end_date.strftime('%Y-%m-%d')}'"
     df = fetch_data("skater", "summary", "points", override_cayenne=clean_date_filter, aggregate=True)
-    
     if df.empty: return pd.DataFrame()
-
-    rename_map = {
-        'skaterFullName': 'Player', 'teamAbbrevs': 'Team', 'positionCode': 'Pos',
-        'goals': 'G', 'assists': 'A', 'points': 'Pts', 'shots': 'SOG', 'ppPoints': 'PPP'
-    }
+    rename_map = {'skaterFullName': 'Player', 'teamAbbrevs': 'Team', 'positionCode': 'Pos', 'goals': 'G', 'assists': 'A', 'points': 'Pts', 'shots': 'SOG', 'ppPoints': 'PPP'}
     df = df.rename(columns=rename_map)
     return df
+
+# --- NEW: STRENGTH OF SCHEDULE HELPERS ---
+
+def load_standings():
+    """Fetches current standings to determine team strength (Points Percentage)."""
+    url = "https://api-web.nhle.com/v1/standings/now"
+    try:
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        standings = {}
+        for team in data.get('standings', []):
+            team_abbr = team['teamAbbrev']['default']
+            # We use Points Percentage (pointPctg) as the best measure of strength
+            standings[team_abbr] = team.get('pointPctg', 0.5)
+        return standings
+    except:
+        return {}
+
+def get_weekly_schedule_matrix():
+    """
+    Builds a DataFrame for the Strength of Schedule Matrix.
+    Index: Team Name
+    Columns: Mon, Tue, Wed...
+    Value: Opponent Name (e.g. '@TOR')
+    """
+    url = "https://api-web.nhle.com/v1/schedule/now"
+    try:
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        game_week = data.get('gameWeek', [])
+        
+        if not game_week: return pd.DataFrame(), {}
+        
+        # 1. Map Dates to Day Names
+        # We need to guarantee Mon-Sun columns
+        days_map = {} # { '2025-12-10': 'Wednesday' }
+        ordered_days = []
+        
+        for day_obj in game_week:
+            date_str = day_obj['date']
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            day_name = dt.strftime("%A") # "Monday"
+            days_map[date_str] = day_name
+            ordered_days.append(day_name)
+            
+        # 2. Initialize Matrix
+        # Get all unique teams from standings or schedule
+        all_teams = sorted(list(set([g['homeTeam']['abbrev'] for d in game_week for g in d['games']] + 
+                                    [g['awayTeam']['abbrev'] for d in game_week for g in d['games']])))
+        
+        matrix = pd.DataFrame(index=all_teams, columns=ordered_days)
+        matrix = matrix.fillna("") # Empty string means no game
+        
+        # 3. Populate Matrix
+        for day_obj in game_week:
+            date_str = day_obj['date']
+            day_name = days_map[date_str]
+            
+            for game in day_obj['games']:
+                home = game['homeTeam']['abbrev']
+                away = game['awayTeam']['abbrev']
+                
+                # For Home Team, opponent is 'vs AWAY'
+                matrix.at[home, day_name] = f"vs {away}"
+                # For Away Team, opponent is '@ HOME'
+                matrix.at[away, day_name] = f"@ {home}"
+
+        # 4. Get Standings for Calculation
+        standings = load_standings()
+        
+        return matrix, standings
+
+    except Exception as e:
+        print(f"SOS Error: {e}")
+        return pd.DataFrame(), {}
