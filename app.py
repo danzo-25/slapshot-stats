@@ -1,28 +1,20 @@
 import streamlit as st
+import streamlit as st
 import pandas as pd
 import altair as alt
-from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders
+from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix
 
 st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
 st.title("🏒 NHL 2025-26 Dashboard")
 
-# --- INITIALIZE SESSION STATE ---
+# --- SESSION STATE ---
 if 'my_roster' not in st.session_state:
     st.session_state.my_roster = []
 
-# --- CUSTOM CSS ---
+# --- CSS ---
 st.markdown("""
 <style>
-    .game-card {
-        background-color: #262730;
-        border: 1px solid #41444e;
-        border-radius: 8px;
-        padding: 5px;
-        text-align: center;
-        margin: 0 auto 5px auto;
-        max-width: 100%;
-        box-shadow: 1px 1px 3px rgba(0,0,0,0.2);
-    }
+    .game-card { background-color: #262730; border: 1px solid #41444e; border-radius: 8px; padding: 5px; text-align: center; margin: 0 auto 5px auto; max-width: 100%; box-shadow: 1px 1px 3px rgba(0,0,0,0.2); }
     .team-row { display: flex; justify-content: center; align-items: center; gap: 5px; }
     .team-info { display: flex; flex-direction: column; align-items: center; }
     .team-logo { width: 55px; height: 55px; object-fit: contain; margin-bottom: 2px; }
@@ -42,6 +34,7 @@ else:
 
     # ================= TAB 1: HOME =================
     with tab_home:
+        # 1. SCHEDULE
         st.header("📅 Today's Games")
         schedule = load_schedule()
         if not schedule:
@@ -70,10 +63,62 @@ else:
                                 <div class="game-time">{game['time']}</div>
                             </div>
                             """, unsafe_allow_html=True)
+        st.divider()
+
+        # 2. STRENGTH OF SCHEDULE (SOS)
+        st.header("💪 Strength of Schedule (Weekly View)")
+        st.caption("Green = Easy Matchup (You are favored). Red = Hard Matchup (Opponent is favored).")
+        
+        with st.spinner("Calculating matchup difficulty..."):
+            sos_matrix, standings = get_weekly_schedule_matrix()
+        
+        if not sos_matrix.empty and standings:
+            # --- COLOR LOGIC ---
+            def color_sos(val, my_team_abbr):
+                """
+                val: The cell value (e.g. "vs TOR" or "")
+                my_team_abbr: The row index (e.g. "EDM")
+                """
+                if not val or val == "":
+                    return 'background-color: #262730' # Grey for no game
+                
+                # Extract Opponent Name ("vs TOR" -> "TOR")
+                opp_abbr = val.split(" ")[1] 
+                
+                # Get Points % (Strength)
+                my_str = standings.get(my_team_abbr, 0.5)
+                opp_str = standings.get(opp_abbr, 0.5)
+                
+                # Calculate Advantage
+                # Positive = I am stronger (Green)
+                # Negative = Opponent is stronger (Red)
+                diff = my_str - opp_str
+                
+                # Gradient Logic (Hex Codes)
+                # Thresholds: +/- 0.15 is a massive gap
+                if diff > 0.15: return 'background-color: #1b5e20; color: white'  # Deep Green
+                elif diff > 0.05: return 'background-color: #2e7d32; color: white' # Medium Green
+                elif diff > 0.00: return 'background-color: #4caf50; color: black' # Light Green
+                elif diff > -0.05: return 'background-color: #fbc02d; color: black' # Yellow/Even
+                elif diff > -0.15: return 'background-color: #c62828; color: white' # Medium Red
+                else: return 'background-color: #b71c1c; color: white'            # Deep Red
+
+            # Apply Style row by row
+            # We iterate through the dataframe and apply the style function
+            def apply_style(df):
+                return df.style.apply(lambda row: [color_sos(val, row.name) for val in row], axis=1)
+
+            styled_sos = apply_style(sos_matrix)
+            
+            # Display
+            st.dataframe(styled_sos, use_container_width=True, height=600)
+        else:
+            st.info("Strength of Schedule data unavailable.")
 
         st.divider()
-        st.header("🔥 Hot This Week (Last 7 Days)")
-        
+
+        # 3. WEEKLY CHARTS
+        st.header("🔥 Hot This Week")
         with st.spinner("Loading weekly trends..."):
             df_weekly = load_weekly_leaders()
         
@@ -83,20 +128,14 @@ else:
                 chart = alt.Chart(sorted_data).mark_bar(cornerRadiusEnd=4).encode(
                     x=alt.X(f'{y_col}:Q', title=None), 
                     y=alt.Y(f'{x_col}:N', sort='-x', title=None), 
-                    color=alt.value(color),
-                    tooltip=[x_col, y_col]
-                )
+                    color=alt.value(color), tooltip=[x_col, y_col]
+                ).properties(title=title, height=200)
                 text = chart.mark_text(align='left', dx=2).encode(text=f'{y_col}:Q')
-                return (chart + text).properties(title=title, height=200)
+                return (chart + text)
 
             c1, c2 = st.columns(2)
             with c1: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
             with c2: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
-            c3, c4 = st.columns(2)
-            with c3: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
-            with c4: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
-        else:
-            st.info("No weekly data available yet.")
 
     # ================= TAB 2: ANALYTICS =================
     with tab_analytics:
@@ -109,26 +148,22 @@ else:
             pid = player_dict[selected_player_name]
             game_log = get_player_game_log(pid)
             if not game_log.empty:
-                game_log['Rolling Points (Last 5)'] = game_log['points'].rolling(window=5, min_periods=1).mean()
-                chart_data = game_log[['gameDate', 'points', 'Rolling Points (Last 5)']].set_index('gameDate')
+                game_log['Rolling Points'] = game_log['points'].rolling(window=5, min_periods=1).mean()
+                chart_data = game_log[['gameDate', 'points', 'Rolling Points']].set_index('gameDate')
                 st.line_chart(chart_data, color=["#d3d3d3", "#ff4b4b"])
         
         st.divider()
         st.subheader("League Summary Table")
         
-        # --- FP CALCULATOR ---
-        with st.expander("⚙️ Fantasy Point Settings (Click to Edit)", expanded=False):
-            st.caption("Adjust these values to match your league scoring.")
+        with st.expander("⚙️ Fantasy Point Settings", expanded=False):
             c_s1, c_s2, c_s3, c_s4, c_s5, c_s6 = st.columns(6)
             c_g1, c_g2, c_g3, c_g4, c_g5, c_g6 = st.columns(6)
-
             val_G = c_s1.number_input("Goals", value=2.0)
             val_A = c_s2.number_input("Assists", value=1.0)
             val_PPP = c_s3.number_input("PPP", value=0.5)
             val_SHP = c_s4.number_input("SHP", value=0.5)
             val_SOG = c_s5.number_input("SOG", value=0.1)
             val_Hit = c_s6.number_input("Hits", value=0.1)
-
             val_BkS = c_g1.number_input("Blocks", value=0.5)
             val_W = c_g2.number_input("Wins", value=4.0)
             val_GA = c_g3.number_input("GA", value=-2.0)
@@ -136,7 +171,6 @@ else:
             val_SO = c_g5.number_input("Shutouts", value=3.0)
             val_OTL = c_g6.number_input("OTL", value=1.0)
 
-        # CALCULATE FP
         df['FP'] = (
             (df['G'] * val_G) + (df['A'] * val_A) + (df['PPP'] * val_PPP) + 
             (df['SHP'] * val_SHP) + (df['SOG'] * val_SOG) + (df['Hits'] * val_Hit) + 
@@ -150,121 +184,80 @@ else:
         column_config = {
             "ID": None,
             "Player": st.column_config.TextColumn("Player", pinned=True),
-            "FP": st.column_config.NumberColumn("FP", help="Fantasy Points", format="%.1f"),
+            "FP": st.column_config.NumberColumn("FP", format="%.1f"),
             "Team": st.column_config.TextColumn("Team"),
             "Pos": st.column_config.TextColumn("Pos"),
-            "GP": st.column_config.NumberColumn("GP"),
-            "G": st.column_config.NumberColumn("G"),
-            "A": st.column_config.NumberColumn("A"),
-            "Pts": st.column_config.NumberColumn("Pts"),
-            "PPP": st.column_config.NumberColumn("PPP"),
-            "SHP": st.column_config.NumberColumn("SHP"),
-            "SOG": st.column_config.NumberColumn("SOG"),
-            "Hits": st.column_config.NumberColumn("Hits"),
-            "BkS": st.column_config.NumberColumn("BkS"),
-            "SAT%": st.column_config.NumberColumn("SAT%"),
-            "USAT%": st.column_config.NumberColumn("USAT%"),
-            "W": st.column_config.NumberColumn("W"),
-            "SV%": st.column_config.NumberColumn("SV%"),
-            "GAA": st.column_config.NumberColumn("GAA"),
-            "GSAA": st.column_config.NumberColumn("GSAA"),
+            "GP": st.column_config.NumberColumn("GP", format="%.0f"),
+            "G": st.column_config.NumberColumn("G", format="%.0f"),
+            "A": st.column_config.NumberColumn("A", format="%.0f"),
+            "Pts": st.column_config.NumberColumn("Pts", format="%.0f"),
+            "PPP": st.column_config.NumberColumn("PPP", format="%.0f"),
+            "SHP": st.column_config.NumberColumn("SHP", format="%.0f"),
+            "SOG": st.column_config.NumberColumn("SOG", format="%.0f"),
+            "Hits": st.column_config.NumberColumn("Hits", format="%.0f"),
+            "BkS": st.column_config.NumberColumn("BkS", format="%.0f"),
+            "W": st.column_config.NumberColumn("W", format="%.0f"),
+            "GA": st.column_config.NumberColumn("GA", format="%.0f"),
+            "Svs": st.column_config.NumberColumn("Svs", format="%.0f"),
+            "SO": st.column_config.NumberColumn("SO", format="%.0f"),
+            "SAT%": st.column_config.NumberColumn("SAT%", format="%.1f%%"),
+            "USAT%": st.column_config.NumberColumn("USAT%", format="%.1f%%"),
+            "SV%": st.column_config.NumberColumn("SV%", format="%.3f"),
+            "GAA": st.column_config.NumberColumn("GAA", format="%.2f"),
+            "GSAA": st.column_config.NumberColumn("GSAA", format="%.2f"),
             "TOI": st.column_config.TextColumn("TOI")
         }
 
-        # Filter
         with st.expander("Filter Options"):
             c1, c2 = st.columns(2)
-            with c1:
-                teams = sorted(df['Team'].unique())
-                sel_teams = st.multiselect("Team", teams, default=teams)
-            with c2:
-                pos = sorted(df['Pos'].unique())
-                sel_pos = st.multiselect("Position", pos, default=pos)
+            teams = sorted(df['Team'].unique())
+            sel_teams = c1.multiselect("Team", teams, default=teams)
+            pos = sorted(df['Pos'].unique())
+            sel_pos = c2.multiselect("Position", pos, default=pos)
 
         filt_df = df.copy()
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
 
-        # --- HIGHLIGHT + FORMAT LOGIC ---
         def highlight_my_team(row):
-            if row['Player'] in st.session_state.my_roster:
-                return ['background-color: #574d28'] * len(row) 
-            else:
-                return [''] * len(row)
+            return ['background-color: #574d28'] * len(row) if row['Player'] in st.session_state.my_roster else [''] * len(row)
 
-        # APPLY HIGHLIGHTING
         styled_df = filt_df.style.apply(highlight_my_team, axis=1)
-
-        # --- FIX: FULL FORMATTING RULES ---
-        # 1. Whole Numbers (No Decimals)
-        whole_num_cols = [
-            'GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'GWG', 
-            'W', 'L', 'OTL', 'GA', 'Svs', 'SO', '+/-'
-        ]
-        valid_whole_cols = [c for c in whole_num_cols if c in filt_df.columns]
-        styled_df = styled_df.format("{:.0f}", subset=valid_whole_cols)
-
-        # 2. Percentages (1 decimal)
-        pct_cols = ['Sh%', 'FO%', 'SAT%', 'USAT%']
-        valid_pct_cols = [c for c in pct_cols if c in filt_df.columns]
-        styled_df = styled_df.format("{:.1f}", subset=valid_pct_cols)
-
-        # 3. Decimals (FP, GAA, GSAA)
+        
+        # Apply formatting
+        whole_num_cols = ['GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SO', 'OTL']
+        valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
+        styled_df = styled_df.format("{:.0f}", subset=valid_whole)
         styled_df = styled_df.format("{:.1f}", subset=['FP'])
         styled_df = styled_df.format("{:.2f}", subset=['GAA', 'GSAA'])
         styled_df = styled_df.format("{:.3f}", subset=['SV%'])
-        
-        # 4. Time On Ice (Treat as string or format if numeric)
-        if 'TOI' in filt_df.columns:
-            # Check if TOI is numeric (it might be string "20:00" or float 20.0)
-            # If float, we format it. If string, Styler ignores it.
-            if pd.api.types.is_numeric_dtype(filt_df['TOI']):
-                 styled_df = styled_df.format("{:.2f}", subset=['TOI'])
 
-        st.dataframe(
-            styled_df, 
-            use_container_width=True, 
-            hide_index=True, 
-            height=600, 
-            column_config=column_config
-        )
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_config=column_config)
 
     # ================= TAB 3: FANTASY =================
     with tab_fantasy:
         st.header("⚔️ My Roster")
         col_up, _ = st.columns([1, 2])
-        with col_up:
-            uploaded_file = st.file_uploader("📂 Load Saved Roster", type=["csv"])
-        
+        uploaded_file = col_up.file_uploader("📂 Load Saved Roster", type=["csv"])
         if uploaded_file:
             try:
                 udf = pd.read_csv(uploaded_file)
                 if "Player" in udf.columns: 
-                    valid_players = [p for p in udf["Player"] if p in df['Player'].values]
-                    st.session_state.my_roster = valid_players
+                    st.session_state.my_roster = [p for p in udf["Player"] if p in df['Player'].values]
             except: pass
 
-        selected_players = st.multiselect(
-            "Search Players:", 
-            df['Player'].unique(), 
-            default=st.session_state.my_roster
-        )
-        
+        selected_players = st.multiselect("Search Players:", df['Player'].unique(), default=st.session_state.my_roster)
         st.session_state.my_roster = selected_players
 
         if selected_players:
             team_df = df[df['Player'].isin(selected_players)]
             st.download_button("💾 Save Roster", team_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
-            
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Goals", int(team_df['G'].sum()))
             c2.metric("Points", int(team_df['Pts'].sum()))
-            total_fp = team_df['FP'].sum() if 'FP' in team_df.columns else 0
-            c3.metric("Total FP", f"{total_fp:,.1f}")
+            c3.metric("Total FP", f"{team_df['FP'].sum():,.1f}")
             c4.metric("Goalie Wins", int(team_df['W'].sum()))
             
-            # Apply same formatting to roster table
             styled_team = team_df.style.format("{:.0f}", subset=[c for c in whole_num_cols if c in team_df.columns])
             styled_team = styled_team.format("{:.1f}", subset=['FP'])
-            
             st.dataframe(styled_team, use_container_width=True, hide_index=True, column_config=column_config)
