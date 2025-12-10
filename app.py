@@ -1,13 +1,3 @@
-The error TypeError: ... st.column_config.NumberColumn happens because NumberColumn does not accept hidden=True as a parameter.
-
-In Streamlit, the correct way to hide a column using column_config is to set that column's key to None.
-The Fix: Update app.py
-
-I have fixed line 24 by changing "ID": ... to "ID": None. This tells Streamlit to completely hide the ID column from the table.
-
-Replace app.py with this corrected version:
-Python
-
 import streamlit as st
 import pandas as pd
 from data_loader import load_nhl_data, get_player_game_log
@@ -127,6 +117,7 @@ else:
             c4.metric("Goalie SO", int(team_df['SO'].sum()))
             
             st.dataframe(team_df, use_container_width=True, hide_index=True, column_co
+
 
 
 
