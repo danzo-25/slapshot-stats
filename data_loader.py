@@ -30,10 +30,10 @@ def load_nhl_data():
 
         df = pd.DataFrame(players_list)
 
-        # 1. Update Rename Map with NEW stats
+        # 1. Update Rename Map
         rename_map = {
             'skaterFullName': 'Player',
-            'teamAbbrevs': 'Team',
+            'teamAbbrevs': 'Team',   # Often returns "TEAM1, TEAM2" for traded players
             'teamAbbrev': 'Team',
             'positionCode': 'Pos',
             'gamesPlayed': 'GP',
@@ -43,10 +43,10 @@ def load_nhl_data():
             'plusMinus': '+/-',
             'penaltyMinutes': 'PIM',
             'ppPoints': 'PPP',
-            'ppGoals': 'PPG',            # New
-            'shPoints': 'SHP',           # New
-            'gameWinningGoals': 'GWG',   # New
-            'timeOnIcePerGame': 'TOI',   # New
+            'ppGoals': 'PPG',
+            'shPoints': 'SHP',
+            'gameWinningGoals': 'GWG',
+            'timeOnIcePerGame': 'TOI',
             'shots': 'SOG',
             'shootingPct': 'Sh%',
             'faceoffWinPct': 'FO%'
@@ -61,7 +61,11 @@ def load_nhl_data():
         if 'Player' not in df.columns:
             df['Player'] = 'Unknown'
 
-        # Ensure Numeric Columns (TOI is a string like "20:15", so we skip it here)
+        # --- FIX: CLEAN UP DUPLICATE TEAMS ---
+        # If Team is "CGY, TOR", split by comma and take the last one ("TOR")
+        df['Team'] = df['Team'].apply(lambda x: x.split(',')[-1].strip() if isinstance(x, str) else x)
+
+        # Ensure Numeric Columns
         numeric_cols = ['GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'PPG', 'SHP', 'GWG', 'SOG', 'Sh%', 'FO%']
         
         for col in numeric_cols:
@@ -73,12 +77,12 @@ def load_nhl_data():
         # Select Columns
         cols_to_keep = ['Player', 'Team', 'Pos', 'GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'PPG', 'SHP', 'GWG', 'SOG', 'Sh%', 'FO%', 'TOI']
         
-        # Final safety
         final_cols = [c for c in cols_to_keep if c in df.columns]
         return df[final_cols]
 
     except Exception as e:
         st.error(f"Error connecting to NHL Stats API: {e}")
         return pd.DataFrame()
+
 
 
