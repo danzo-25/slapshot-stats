@@ -4,7 +4,7 @@ import altair as alt
 from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news
 
 st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
-st.title("🏒 NHL 2025-26 Dashboard")
+st.title("🏒 Slapshot Stats")
 
 # --- SESSION STATE ---
 if 'my_roster' not in st.session_state:
@@ -271,3 +271,4 @@ else:
             styled_team = team_df.style.format("{:.0f}", subset=[c for c in whole_num_cols if c in team_df.columns])
             styled_team = styled_team.format("{:.1f}", subset=['FP'])
             st.dataframe(styled_team, use_container_width=True, hide_index=True, column_config=column_config)
+
