@@ -1,108 +1,90 @@
 import streamlit as st
 import pandas as pd
-from data_loader import load_nhl_data
+from data_loader import load_nhl_data, get_player_game_log
 
-# Set page config
 st.set_page_config(layout="wide", page_title="NHL Stats Dashboard")
 st.title("🏒 NHL 2025-26 Fantasy Tool")
 
 # --- LOAD DATA ---
-with st.spinner('Loading Skater & Goalie Data...'):
+with st.spinner('Loading NHL Data...'):
     df = load_nhl_data()
 
 if df.empty:
-    st.warning("No data found. The API might be busy or the season hasn't started.")
+    st.warning("No data found. API might be down.")
 else:
-    tab1, tab2 = st.tabs(["🏆 League Leaders", "⚔️ My Fantasy Team"])
+    # --- TABS ---
+    tab1, tab2 = st.tabs(["📊 Summary & Trends", "⚔️ My Fantasy Team"])
 
-    # Define Column Config (Used in both tabs)
+    # Define Config (Hidden ID column)
     column_config = {
+        "ID": st.column_config.NumberColumn("ID", hidden=True), # Hide ID from user
         "Player": st.column_config.TextColumn("Player", pinned=True),
         "Team": st.column_config.TextColumn("Team", help="Team"),
         "Pos": st.column_config.TextColumn("Pos", help="Position"),
-        # Common
         "GP": st.column_config.NumberColumn("GP", help="Games Played"),
         "G": st.column_config.NumberColumn("G", help="Goals"),
         "A": st.column_config.NumberColumn("A", help="Assists"),
         "Pts": st.column_config.NumberColumn("Pts", help="Points"),
-        "PIM": st.column_config.NumberColumn("PIM", help="Penalty Minutes"),
-        # Skater Specific
-        "+/-": st.column_config.NumberColumn("+/-", help="Plus/Minus"),
-        "PPP": st.column_config.NumberColumn("PPP", help="Power Play Points"),
-        "PPG": st.column_config.NumberColumn("PPG", help="Power Play Goals"),
-        "GWG": st.column_config.NumberColumn("GWG", help="Game Winning Goals"),
-        "SOG": st.column_config.NumberColumn("SOG", help="Shots on Goal"),
-        "Sh%": st.column_config.NumberColumn("Sh%", help="Shooting %", format="%.1f%%"),
-        "FO%": st.column_config.NumberColumn("FO%", help="Faceoff Win %", format="%.1f%%"),
-        # Goalie Specific
         "W": st.column_config.NumberColumn("W", help="Wins"),
-        "L": st.column_config.NumberColumn("L", help="Losses"),
-        "OTL": st.column_config.NumberColumn("OTL", help="Overtime Losses"),
-        "GAA": st.column_config.NumberColumn("GAA", help="Goals Against Average", format="%.2f"),
-        "SV%": st.column_config.NumberColumn("SV%", help="Save Percentage", format="%.3f"),
-        "SO": st.column_config.NumberColumn("SO", help="Shutouts"),
+        "SV%": st.column_config.NumberColumn("SV%", help="Save %", format="%.3f"),
+        "GAA": st.column_config.NumberColumn("GAA", help="GAA", format="%.2f"),
         "TOI": st.column_config.TextColumn("TOI", help="Time On Ice")
     }
 
     # ==========================================
-    # TAB 1: LEAGUE LEADERS
+    # TAB 1: SUMMARY & TRENDS
     # ==========================================
     with tab1:
-        st.header("League Leaders")
+        # --- SECTION A: TREND VISUALIZER ---
+        st.header("📈 Breakout Detector")
+        st.info("Select a player to see if they are heating up (Rolling 5-Game Average).")
+
+        # 1. Player Selector
+        # Create a list of "Player Name (Team)" for the dropdown
+        player_options = df.sort_values('Pts', ascending=False)
+        player_dict = dict(zip(player_options['Player'], player_options['ID']))
         
-        with st.expander("Filter Options", expanded=True):
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                if 'Team' in df.columns:
-                    unique_teams = sorted(df['Team'].dropna().unique())
-                    selected_teams = st.multiselect("Filter by Team", unique_teams, default=unique_teams)
-            with col_f2:
-                if 'Pos' in df.columns:
-                    # Sort positions so 'G' is usually at the end or distinct
-                    unique_pos = sorted(df['Pos'].dropna().unique())
-                    selected_positions = st.multiselect("Filter by Position", unique_pos, default=unique_pos)
+        selected_player_name = st.selectbox("Select Player to Analyze:", player_options['Player'].unique())
 
-        # Apply Filters
-        filtered_df = df.copy()
-        if selected_teams and 'Team' in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df['Team'].isin(selected_teams)]
-        if selected_positions and 'Pos' in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df['Pos'].isin(selected_positions)]
+        if selected_player_name:
+            # 2. Fetch Logs
+            pid = player_dict[selected_player_name]
+            with st.spinner(f"Fetching game log for {selected_player_name}..."):
+                game_log = get_player_game_log(pid)
+            
+            if not game_log.empty:
+                # 3. Process Data for Graph
+                # We want "Points" over time.
+                # Use .rolling(window=5).mean() to smooth out the noise and show the trend
+                game_log['Rolling Points (Last 5)'] = game_log['points'].rolling(window=5, min_periods=1).mean()
+                
+                # Create a simple chart dataframe
+                chart_data = game_log[['gameDate', 'points', 'Rolling Points (Last 5)']].set_index('gameDate')
+                
+                # 4. Plot
+                st.line_chart(chart_data, color=["#d3d3d3", "#ff4b4b"]) 
+                # Grey = Actual Daily Points, Red = The Trend Line (Rolling Avg)
+                
+                st.caption("Grey Line: Daily Points | Red Line: 5-Game Rolling Average (The Trend)")
+            else:
+                st.warning("No game log data available for this player.")
 
-        # Leader Metrics (Dynamic based on Position)
-        st.markdown("### Top Performers")
-        m1, m2, m3, m4 = st.columns(4)
+        st.divider()
+
+        # --- SECTION B: LEAGUE TABLE ---
+        st.subheader("League Summary Table")
         
-        def get_top(d, col):
-            if d.empty or col not in d.columns: return "N/A", 0
-            row = d.sort_values(by=col, ascending=False).iloc[0]
-            return row['Player'], row[col]
+        with st.expander("Filter Options"):
+            c1, c2 = st.columns(2)
+            with c1:
+                teams = sorted(df['Team'].unique())
+                sel_teams = st.multiselect("Team", teams, default=teams)
+            with c2:
+                pos = sorted(df['Pos'].unique())
+                sel_pos = st.multiselect("Position", pos, default=pos)
 
-        # If only Goalies are selected, show Goalie Metrics
-        is_only_goalies = (len(selected_positions) == 1 and 'G' in selected_positions)
-        
-        if is_only_goalies:
-            w_name, w_val = get_top(filtered_df, 'W')
-            sv_name, sv_val = get_top(filtered_df, 'SV%')
-            gaa_name, gaa_val = get_top(filtered_df[filtered_df['GP'] > 5], 'GAA') # Filter low GP for GAA sort logic
-            so_name, so_val = get_top(filtered_df, 'SO')
-
-            m1.metric("Wins Leader", str(int(w_val)), w_name)
-            m2.metric("Best SV%", f"{sv_val:.3f}", sv_name)
-            m3.metric("Shutout Leader", str(int(so_val)), so_name)
-            m4.metric("Total Players", len(filtered_df))
-        else:
-            p_name, p_val = get_top(filtered_df, 'Pts')
-            g_name, g_val = get_top(filtered_df, 'G')
-            a_name, a_val = get_top(filtered_df, 'A')
-            w_name, w_val = get_top(filtered_df, 'W') # Show Wins as 4th metric if mixed
-
-            m1.metric("Points", str(int(p_val)), p_name)
-            m2.metric("Goals", str(int(g_val)), g_name)
-            m3.metric("Assists", str(int(a_val)), a_name)
-            m4.metric("Wins (Goalies)", str(int(w_val)), w_name)
-
-        st.dataframe(filtered_df, use_container_width=True, hide_index=True, height=600, column_config=column_config)
+        filt_df = df[df['Team'].isin(sel_teams) & df['Pos'].isin(sel_pos)]
+        st.dataframe(filt_df, use_container_width=True, hide_index=True, height=500, column_config=column_config)
 
     # ==========================================
     # TAB 2: MY FANTASY TEAM
@@ -110,71 +92,34 @@ else:
     with tab2:
         st.header("⚔️ My Roster")
         
-        # --- 1. LOAD TEAM (UPLOAD) ---
-        col_up, col_help = st.columns([1, 2])
+        col_up, _ = st.columns([1, 2])
         with col_up:
             uploaded_file = st.file_uploader("📂 Load Saved Roster", type=["csv"])
         
         default_roster = []
-        all_player_names = sorted(df['Player'].unique())
-
-        if uploaded_file is not None:
+        if uploaded_file:
             try:
-                uploaded_df = pd.read_csv(uploaded_file)
-                if "Player" in uploaded_df.columns:
-                    valid_players = [p for p in uploaded_df["Player"] if p in all_player_names]
-                    default_roster = valid_players
-                    st.success(f"Loaded {len(valid_players)} players!")
-            except Exception as e:
-                st.error(f"Error reading file: {e}")
+                udf = pd.read_csv(uploaded_file)
+                if "Player" in udf.columns: default_roster = [p for p in udf["Player"] if p in df['Player'].values]
+            except: pass
 
-        # --- 2. SELECT PLAYERS ---
-        my_team_list = st.multiselect(
-            "Search and Add Players (Skaters & Goalies):", 
-            all_player_names, 
-            default=default_roster,
-            placeholder="Type a name (e.g. McDavid, Shesterkin)..."
-        )
+        my_team = st.multiselect("Search Players:", df['Player'].unique(), default=default_roster)
 
-        if my_team_list:
-            my_team_df = df[df['Player'].isin(my_team_list)]
-
-            # --- 3. SAVE TEAM (DOWNLOAD) ---
-            csv_data = my_team_df[['Player']].to_csv(index=False)
-            st.download_button(
-                label="💾 Save Roster to File",
-                data=csv_data,
-                file_name="my_fantasy_roster.csv",
-                mime="text/csv"
-            )
-
-            st.divider()
-
-            # Team Stats
+        if my_team:
+            team_df = df[df['Player'].isin(my_team)]
+            
+            # Download
+            st.download_button("💾 Save Roster", team_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
+            
+            # Totals
             st.markdown("### Team Totals")
-            t1, t2, t3, t4 = st.columns(4)
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Goals", int(team_df['G'].sum()))
+            c2.metric("Points", int(team_df['Pts'].sum()))
+            c3.metric("Goalie Wins", int(team_df['W'].sum()))
+            c4.metric("Goalie SO", int(team_df['SO'].sum()))
             
-            # Skater Totals
-            total_goals = int(my_team_df['G'].sum())
-            total_pts = int(my_team_df['Pts'].sum())
-            
-            # Goalie Totals
-            total_wins = int(my_team_df['W'].sum())
-            total_so = int(my_team_df['SO'].sum())
+            st.dataframe(team_df, use_container_width=True, hide_index=True, column_config=column_config)
 
-            t1.metric("Total Goals", total_goals)
-            t2.metric("Total Points", total_pts)
-            t3.metric("Goalie Wins", total_wins)
-            t4.metric("Goalie Shutouts", total_so)
-
-            st.markdown("### Roster Breakdown")
-            st.dataframe(
-                my_team_df, 
-                use_container_width=True, 
-                hide_index=True, 
-                column_config=column_config
-            )
-        else:
-            st.info("Start by adding players or uploading a saved roster.")
 
 
