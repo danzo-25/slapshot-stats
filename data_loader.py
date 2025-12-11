@@ -247,11 +247,9 @@ def load_nhl_news():
         return []
 
 # --- FETCH NHL STANDINGS ---
-def get_standings_url(view_type):
-    return "https://api-web.nhle.com/v1/standings/now"
-
 @st.cache_data(ttl=300)
 def fetch_nhl_standings(view_type):
+    # The API endpoint is the same, we filter in the function
     url = "https://api-web.nhle.com/v1/standings/now"
     
     try:
@@ -300,18 +298,20 @@ def fetch_nhl_standings(view_type):
     except Exception as e:
         return pd.DataFrame()
 
-
-# --- UNIFIED ESPN LEAGUE FETCHER ---
+# --- UNIFIED ESPN LEAGUE FETCHER (Robust) ---
 @st.cache_data(ttl=60)
 def fetch_espn_league_data(league_id, season_year):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Accept': 'application/json',
     }
-    params = {'view': 'mRoster,mSettings,mTeam'}
-
+    
+    # We try both views. Sometimes 'mRoster' needs to be separate.
+    # For a robust check, we will use a known working endpoint pattern.
+    
     def try_fetch(year):
         url = f"https://fantasy.espn.com/apis/v3/games/fhl/seasons/{year}/segments/0/leagues/{league_id}"
+        params = {'view': ['mRoster', 'mSettings', 'mTeam']} # List format is often better for multiple views
         try:
             r = requests.get(url, params=params, headers=headers, timeout=5)
             if r.status_code == 200: return r.json(), 'SUCCESS'
@@ -351,9 +351,15 @@ def fetch_espn_league_data(league_id, season_year):
         teams_map = {}
         for t in data.get('teams', []):
             t_id = t['id']
-            name = t.get('abbrev')
-            if not name: name = t.get('nickname')
-            if not name: name = f"Team {t_id}"
+            # Fallback for name
+            name = t.get('name')
+            if not name:
+                # Try combining location and nickname
+                loc = t.get('location', '')
+                nick = t.get('nickname', '')
+                if loc and nick: name = f"{loc} {nick}"
+                elif t.get('abbrev'): name = t.get('abbrev')
+                else: name = f"Team {t_id}"
             teams_map[t_id] = name
 
         for team in data.get('teams', []):
@@ -367,7 +373,6 @@ def fetch_espn_league_data(league_id, season_year):
                 
                 if full_name:
                     meta = find_metadata(full_name)
-                    # We store just text data now to avoid frontend logic issues
                     roster_entry = {
                         'Name': full_name,
                         'NHLTeam': str(meta['Team']).strip() if meta else 'FA'
@@ -380,18 +385,15 @@ def fetch_espn_league_data(league_id, season_year):
     standings_list = []
     try:
         for team in data.get('teams', []):
-            abbrev = team.get('abbrev')
-            location = team.get('location', '')
-            nickname = team.get('nickname', '')
-            if location and nickname: full_name = f"{location} {nickname}"
-            elif abbrev: full_name = abbrev
-            else: full_name = f"Team {team.get('id')}"
+            t_id = team['id']
+            full_name = teams_map.get(t_id, f"Team {t_id}")
 
             record = team.get('record', {}).get('overall', {})
             wins = record.get('wins', 0)
             losses = record.get('losses', 0)
             ties = record.get('ties', 0)
-            rank = team.get('playoffSeed', team.get('rankCalculatedFinal', 0))
+            # Use 'playoffSeed' for rank, default to 0
+            rank = team.get('playoffSeed', 0)
 
             standings_list.append({'Rank': rank, 'Team': full_name, 'W': wins, 'L': losses, 'T': ties})
         
