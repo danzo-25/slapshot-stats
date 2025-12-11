@@ -37,40 +37,34 @@ def remove_player(player, side):
 # --- CSS ---
 st.markdown("""
 <style>
-    /* Tab 5 Grid */
+    /* New CSS for the Tab 5 Player Grid */
     .league-grid-container {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 15px;
-        margin-top: 15px;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 20px;
+        margin-top: 20px;
     }
     .team-roster-box {
-        padding: 10px;
-        border: 1px solid #41444e;
+        padding: 15px;
+        border: 1px solid #333;
         border-radius: 8px;
-        background-color: #262730;
-    }
-    .team-roster-header {
-        font-weight: bold;
-        font-size: 1.1em;
-        margin-bottom: 10px;
-        border-bottom: 1px solid #555;
-        padding-bottom: 5px;
+        background-color: #1e1e1e;
+        min-height: 400px;
     }
     .roster-player-item {
         display: flex;
         align-items: center;
-        margin-bottom: 4px;
-        padding: 4px;
-        background-color: #1e1e1e;
+        margin-bottom: 5px;
+        padding: 5px;
+        background-color: #262730;
         border-radius: 4px;
-        font-size: 0.85em;
+        font-size: 0.9em;
     }
     .player-headshot {
-        width: 25px;
-        height: 25px;
+        width: 30px;
+        height: 30px;
         border-radius: 50%;
-        margin-right: 8px;
+        margin-right: 10px;
         object-fit: cover;
     }
 
@@ -122,6 +116,7 @@ else:
         )
         
         with st.expander("Fantasy Scoring (FP)", expanded=False):
+            st.caption("Customize these to match your league.")
             val_G = st.number_input("Goals", value=2.0)
             val_A = st.number_input("Assists", value=1.0)
             val_PPP = st.number_input("PPP", value=0.5)
@@ -145,11 +140,10 @@ else:
             roster_data, standings_df, league_name, status = fetch_espn_league_data(league_id, 2026)
             
             if status == 'SUCCESS':
-                st.session_state.league_name = league_name # Save dynamic name
-                st.session_state.league_rosters = roster_data # Save for Tab 5
+                st.session_state.league_name = league_name 
+                st.session_state.league_rosters = roster_data 
 
                 # Update Rosters
-                # roster_data is now: {TeamName: [{'Name': '...', 'Headshot': '...'}, ...]}
                 roster_players = [p['Name'] for team in roster_data.values() for p in team]
                 st.session_state.my_roster = [p for p in st.session_state.my_roster if p in roster_players]
 
@@ -213,6 +207,8 @@ else:
                             </div>""", unsafe_allow_html=True)
         st.divider()
         col_sos, col_news = st.columns([3, 2])
+        
+        # --- SOS TABLE (LOGOS) ---
         with col_sos:
             st.header("💪 Strength of Schedule")
             with st.spinner("Calculating..."):
@@ -287,7 +283,7 @@ else:
             with c3: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
             with c4: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
 
-    # ================= TAB 2: ANALYTICS =================
+    # ================= TAB 2: ANALYTICS (League Summary) =================
     with tab_analytics:
         st.header("📈 Breakout Detector")
         skater_options = df[df['PosType'] == 'Skater'].sort_values('Pts', ascending=False)
@@ -312,9 +308,10 @@ else:
             pos = sorted(df['Pos'].unique())
             sel_pos = c2.multiselect("Position", pos, default=pos)
         
+        # REMOVED TIME FILTER FROM LEAGUE SUMMARY DUE TO PERFORMANCE CRASH
         st.caption("Time filtering is only available on 'My Roster' (Tab 4) due to API performance constraints.")
 
-        # --- DATA FILTERING ---
+        # --- DATA FILTERING (Static Filters Only) ---
         filt_df = df.copy()
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
@@ -352,7 +349,7 @@ else:
                 "BkS": st.column_config.NumberColumn("BkS", format="%.0f", help="Blocked Shots"),
             }
             
-            # FORMATTING
+            # FORMATTING LOGIC
             whole_num_cols = ['GWG', 'GP', 'G', 'A', 'Pts', 'PIM', 'SOG', 'W', 'L', 'OTL', 'GA', 'Svs', 'SO', '+/-', 'PPP', 'SHP', 'Hits', 'BkS']
             valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
             styled_df = styled_df.format("{:.0f}", subset=valid_whole)
@@ -372,10 +369,12 @@ else:
         else:
             st.info("No player data available for the current filters or time period.")
 
+
     # ================= TAB 3: FANTASY TOOLS =================
     with tab_tools:
         st.header("⚖️ Trade Analyzer")
         
+        # --- LEAGUE STANDINGS ---
         if 'espn_standings' in st.session_state and not st.session_state.espn_standings.empty:
             st.subheader("🏆 League Standings")
             st.dataframe(
@@ -482,27 +481,34 @@ else:
         st.header("⚔️ My Roster")
         col_up, _ = st.columns([1, 2])
         
+        # --- ROW 1: FILE UPLOAD & TIME FILTER ---
         with col_up:
             uploaded_file = st.file_uploader("📂 Load Saved Roster (CSV)", type=["csv"])
         
         time_filter = st.selectbox("Select Time Frame", ["Season (2025/26)", "Last 7 Days", "Last 15 Days", "Last 30 Days"])
 
+        # Import Roster from CSV if available
         if uploaded_file:
             try:
                 udf = pd.read_csv(uploaded_file)
                 if "Player" in udf.columns: st.session_state.my_roster = [p for p in udf["Player"] if p in df['Player'].values]
             except: pass
 
+        # Manual Selection (Used for display if league ID isn't entered)
         selected_players = st.multiselect("Search Players:", df['Player'].unique(), default=st.session_state.my_roster)
         st.session_state.my_roster = selected_players
 
         if selected_players:
             base_team_df = df[df['Player'].isin(selected_players)].copy()
-            display_df = base_team_df 
+            
+            # --- DATE FILTERING LOGIC ---
+            display_df = base_team_df # Default to Season stats
             
             if time_filter != "Season (2025/26)":
                 days_map = {"Last 7 Days": 7, "Last 15 Days": 15, "Last 30 Days": 30}
                 days = days_map.get(time_filter, 0)
+                
+                # FIXED: Force Start Date to Midnight to avoid missing early games using Pandas Timestamp
                 start_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=days)
                 
                 st.caption(f"Showing stats from **{start_date.strftime('%Y-%m-%d')}** to Present")
@@ -543,9 +549,11 @@ else:
                     
                     if recent_stats:
                         display_df = pd.DataFrame(recent_stats)
+                        # Re-merge TOI from main df as it's not easily aggregated
                         if 'TOI' in df.columns:
                             display_df = display_df.merge(df[['ID', 'TOI']], on='ID', how='left')
             
+            # --- RENDER METRICS ---
             st.download_button("💾 Save Roster", base_team_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
             
             c1, c2, c3, c4 = st.columns(4)
@@ -554,6 +562,7 @@ else:
             c3.metric("Total FP", f"{display_df['FP'].sum():,.1f}" if 'FP' in display_df.columns else "0.0")
             c4.metric("Goalie Wins", int(display_df['W'].sum()) if 'W' in display_df.columns else 0)
             
+            # --- RENDER TABLE ---
             all_possible_cols = ['Player', 'Team', 'Pos', 'FP', 'GP', 'G', 'A', 'Pts', 'GWG', 'SOG', 'Sh%', 'FO%', 'L', 'OTL', 'GAA', 'SV%', 'GSAA', 'SO', 'PIM', 'Hits', 'BkS', 'W', 'Svs', 'GA', 'TOI', 'SHP', 'PPP']
             final_cols = [c for c in all_possible_cols if c in display_df.columns and c != 'ID'] 
             
@@ -579,13 +588,14 @@ else:
                 "SOG": st.column_config.NumberColumn("SOG", format="%.0f"),
                 "W": st.column_config.NumberColumn("W", format="%.0f"),
                 "GA": st.column_config.NumberColumn("GA", format="%.0f"),
-                "TOI": st.column_config.TextColumn("TOI", help="Time On Ice per Game"),
+                "TOI": st.column_config.TextColumn("TOI", help="Time On Ice per Game (string format)"),
                 "SHP": st.column_config.NumberColumn("SHP", format="%.0f", help="Shorthanded Points"),
                 "PPP": st.column_config.NumberColumn("PPP", format="%.0f", help="Power Play Points"),
             }
             
             full_whole_num_cols = ['G', 'A', 'Pts', 'GWG', 'SOG', 'L', 'OTL', 'SO', 'GP', 'PIM', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SHP', 'PPP']
             valid_whole = [c for c in full_whole_num_cols if c in display_df.columns]
+            
             valid_one_dec = [c for c in ['FP', 'Sh%', 'FO%'] if c in display_df.columns]
             valid_two_dec = [c for c in ['GAA', 'GSAA'] if c in display_df.columns]
             valid_three_dec = [c for c in ['SV%'] if c in display_df.columns]
@@ -598,6 +608,7 @@ else:
 
             st.dataframe(styled_team, use_container_width=True, hide_index=True, column_config=roster_config)
             
+            # --- COLD TRENDS GRAPH ---
             st.divider()
             st.subheader("❄️ Cold Trends (Last 5 Games vs Season Avg)")
             
@@ -694,14 +705,14 @@ else:
                     group_data = group_data[display_cols].reset_index(drop=True)
                     styled_group = group_data.style.format({
                         'P%': '{:.3f}', 'W': '{:.0f}', 'L': '{:.0f}', 'OTL': '{:.0f}', 'PTS': '{:.0f}'
-                    }).apply_index(lambda x: 'font-weight: bold', axis=1)
+                    }).hide(axis="index")
                     st.markdown(styled_group.to_html(), unsafe_allow_html=True)
                     
             else:
                 league_data = standings_data[display_cols]
                 styled_league = league_data.style.format({
                     'P%': '{:.3f}', 'W': '{:.0f}', 'L': '{:.0f}', 'OTL': '{:.0f}', 'PTS': '{:.0f}'
-                })
+                }).hide(axis="index")
                 st.markdown(styled_league.to_html(), unsafe_allow_html=True)
         else:
             st.info("Could not load current NHL standings.")
