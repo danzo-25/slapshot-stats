@@ -3,7 +3,7 @@ import pandas as pd
 import altair as alt
 import re
 from datetime import datetime, timedelta
-from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news, fetch_espn_roster_data
+from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news, fetch_espn_roster_data, fetch_espn_standings
 
 st.set_page_config(layout="wide", page_title="Slapshot Stats")
 st.title("🏒 Slapshot Stats")
@@ -12,6 +12,7 @@ st.title("🏒 Slapshot Stats")
 if 'my_roster' not in st.session_state: st.session_state.my_roster = []
 if "trade_send" not in st.session_state: st.session_state.trade_send = []
 if "trade_recv" not in st.session_state: st.session_state.trade_recv = []
+if "espn_standings" not in st.session_state: st.session_state.espn_standings = pd.DataFrame()
 
 # --- CALLBACKS ---
 def add_player_from_select(side):
@@ -100,6 +101,7 @@ else:
 
     if league_id:
         try:
+            # 1. Fetch Roster
             roster_data, status = fetch_espn_roster_data(league_id, 2026)
             
             if status == 'SUCCESS':
@@ -109,6 +111,11 @@ else:
                 df['Team'] = df['Player'].apply(lambda x: 
                                                 next((team_abbr for team_abbr, players in roster_data.items() if x in players), x)
                                                 if x in roster_players else 'FA')
+            
+            # 2. Fetch Standings
+            standings_df = fetch_espn_standings(league_id, 2026)
+            if not standings_df.empty:
+                st.session_state.espn_standings = standings_df
             
             elif status == 'PRIVATE':
                 st.sidebar.error("Error: League is Private or Invalid ID. Cannot fetch rosters.")
@@ -267,12 +274,9 @@ else:
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
 
-        # --- TIME FILTER LOGIC (FIXED) ---
         if time_filter_league != "Season (2025/26)":
             days_map = {"Last 7 Days": 7, "Last 15 Days": 15, "Last 30 Days": 30}
             days = days_map.get(time_filter_league, 0)
-            
-            # CRITICAL FIX: Reset start_date to Midnight (00:00:00) to include the full start day
             start_date = (datetime.now() - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
             
             with st.spinner(f"Aggregating league activity for last {days} days..."):
@@ -297,7 +301,6 @@ else:
                                 'W': len(recent[recent['decision'] == 'W']) if 'decision' in recent.columns else 0,
                                 'SHP': recent['shorthandedPoints'].sum() if 'shorthandedPoints' in recent.columns else 0,
                             }
-                            # Recalculate FP
                             fp = (stat_dict['G']*val_G + stat_dict['A']*val_A + stat_dict['PPP']*val_PPP + 
                                   stat_dict['SOG']*val_SOG + stat_dict['Hits']*val_Hit + stat_dict['BkS']*val_BkS +
                                   stat_dict['W']*val_W + (stat_dict['SHP'] * val_SHP))
@@ -306,13 +309,10 @@ else:
 
                 if recent_stats:
                     recent_df = pd.DataFrame(recent_stats)
-                    # Merge only missing columns, exclude 'ID' from list to prevent dupe error
                     base_cols = ['Sh%', 'FO%', 'GAA', 'SV%', 'GSAA', 'TOI']
                     existing_base_cols = [c for c in base_cols if c in df.columns]
-                    
                     if existing_base_cols:
                         recent_df = recent_df.merge(df[['ID'] + existing_base_cols], on='ID', how='left')
-                    
                     filt_df = recent_df
                 else:
                     filt_df = pd.DataFrame()
@@ -350,7 +350,6 @@ else:
                 "BkS": st.column_config.NumberColumn("BkS", format="%.0f", help="Blocked Shots"),
             }
             
-            # FORMATTING LOGIC
             whole_num_cols = ['GWG', 'GP', 'G', 'A', 'Pts', 'PIM', 'SOG', 'W', 'L', 'OTL', 'GA', 'Svs', 'SO', '+/-', 'PPP', 'SHP', 'Hits', 'BkS']
             valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
             styled_df = styled_df.format("{:.0f}", subset=valid_whole)
@@ -374,6 +373,18 @@ else:
     # ================= TAB 3: FANTASY TOOLS =================
     with tab_tools:
         st.header("⚖️ Trade Analyzer")
+        
+        # --- NEW: LEAGUE STANDINGS ---
+        if 'espn_standings' in st.session_state and not st.session_state.espn_standings.empty:
+            st.subheader("🏆 League Standings")
+            # Convert standings dataframe to styled display
+            st.dataframe(
+                st.session_state.espn_standings.style.apply(lambda x: ['background-color: #262730']*len(x), axis=1),
+                use_container_width=True,
+                hide_index=True
+            )
+            st.divider()
+
         st.info("Compare players based on current stats and **Rest of Season (ROS)** projections.")
         
         if 'Player' in df.columns:
@@ -497,8 +508,7 @@ else:
             if time_filter != "Season (2025/26)":
                 days_map = {"Last 7 Days": 7, "Last 15 Days": 15, "Last 30 Days": 30}
                 days = days_map.get(time_filter, 0)
-                
-                # FIXED: Force Start Date to Midnight to avoid missing early games
+                # Force Midnight for start date
                 start_date = (datetime.now() - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
                 
                 with st.spinner(f"Fetching stats for last {days} days..."):
