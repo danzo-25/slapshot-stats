@@ -263,8 +263,8 @@ else:
             return ['background-color: #574d28'] * len(row) if row['Player'] in st.session_state.my_roster else [''] * len(row)
         styled_df = filt_df.style.apply(highlight_my_team, axis=1)
         
-        # Safe formatting for Analytics tab
-        whole_num_cols = ['GWG', 'GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SO', 'OTL', '+/-']
+        # Define all possible whole number columns including L and TOI (for formatting)
+        whole_num_cols = ['GWG', 'GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SO', 'OTL', '+/-', 'L'] 
         valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
         
         styled_df = styled_df.format("{:.0f}", subset=valid_whole)
@@ -272,7 +272,8 @@ else:
         styled_df = styled_df.format("{:.2f}", subset=[c for c in ['GAA', 'GSAA'] if c in filt_df.columns])
         styled_df = styled_df.format("{:.3f}", subset=[c for c in ['SV%'] if c in filt_df.columns])
         
-        cols = ['ID', 'Player', 'Team', 'Pos', 'FP', 'ROS_FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining'] and not c.startswith('ROS_')]
+        # Exclude ID for display. TOI is handled by default (as it's a string from the API).
+        cols = ['Player', 'Team', 'Pos', 'FP', 'ROS_FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining'] and not c.startswith('ROS_')]
         st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_order=cols)
 
     # ================= TAB 3: FANTASY TOOLS =================
@@ -450,7 +451,7 @@ else:
             
             # --- RENDER TABLE ---
             # Define all possible columns for the table (excluding ID and PosType)
-            all_possible_cols = ['Player', 'Team', 'Pos', 'FP', 'GP', 'G', 'A', 'Pts', 'GWG', 'SOG', 'Sh%', 'FO%', 'L', 'OTL', 'GAA', 'SV%', 'GSAA', 'SO', 'PIM', 'Hits', 'BkS', 'W', 'Svs', 'GA']
+            all_possible_cols = ['Player', 'Team', 'Pos', 'FP', 'GP', 'G', 'A', 'Pts', 'GWG', 'SOG', 'Sh%', 'FO%', 'L', 'OTL', 'GAA', 'SV%', 'GSAA', 'SO', 'PIM', 'Hits', 'BkS', 'W', 'Svs', 'GA', 'TOI']
             final_cols = [c for c in all_possible_cols if c in display_df.columns and c != 'ID'] 
             
             # 1. COLUMN CONFIG (for Tooltips & Pinning)
@@ -476,6 +477,7 @@ else:
                 "SOG": st.column_config.NumberColumn("SOG", format="%.0f"),
                 "W": st.column_config.NumberColumn("W", format="%.0f"),
                 "GA": st.column_config.NumberColumn("GA", format="%.0f"),
+                "TOI": st.column_config.TextColumn("TOI", help="Time on Ice per Game (string format)")
             }
             
             # 2. STYLING (for Decimal Control - ONLY apply to existing columns)
