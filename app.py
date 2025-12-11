@@ -37,19 +37,27 @@ def remove_player(player, side):
 # --- CSS ---
 st.markdown("""
 <style>
+    /* Tab 5 Grid */
     .league-grid-container {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 20px;
-        margin-top: 20px;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 15px;
+        margin-top: 15px;
     }
     .team-roster-box {
-        padding: 15px;
-        border: 1px solid #333;
+        padding: 10px;
+        border: 1px solid #41444e;
         border-radius: 8px;
-        background-color: #1e1e1e;
-        min-height: 400px;
+        background-color: #262730;
     }
+    .team-roster-header {
+        font-weight: bold;
+        font-size: 1.1em;
+        margin-bottom: 10px;
+        border-bottom: 1px solid #555;
+        padding-bottom: 5px;
+    }
+    
     .game-card { background-color: #262730; border: 1px solid #41444e; border-radius: 8px; padding: 5px; text-align: center; margin: 0 auto 5px auto; max-width: 100%; box-shadow: 1px 1px 3px rgba(0,0,0,0.2); }
     .team-row { display: flex; justify-content: center; align-items: center; gap: 5px; }
     .team-info { display: flex; flex-direction: column; align-items: center; }
@@ -87,10 +95,11 @@ else:
         st.header("⚙️ League Settings")
         st.caption("Enter your ESPN League ID (must be public)")
 
+        # Simple ID Input with clear feedback container
         league_id = st.text_input("ESPN League ID", key="league_id_input", placeholder="e.g., 234472")
+        status_container = st.empty() # Placeholder for success/error msg
         
         with st.expander("Fantasy Scoring (FP)", expanded=False):
-            st.caption("Customize these to match your league.")
             val_G = st.number_input("Goals", value=2.0)
             val_A = st.number_input("Assists", value=1.0)
             val_PPP = st.number_input("PPP", value=0.5)
@@ -113,23 +122,26 @@ else:
             roster_data, standings_df, league_name, status = fetch_espn_league_data(league_id, 2026)
             
             if status == 'SUCCESS':
+                status_container.success(f"✅ Loaded: {league_name}")
                 st.session_state.league_name = league_name 
                 st.session_state.league_rosters = roster_data 
 
                 roster_players = [p['Name'] for team in roster_data.values() for p in team]
                 st.session_state.my_roster = [p for p in st.session_state.my_roster if p in roster_players]
 
-                df['Team'] = df['Player'].apply(lambda x: next((p['NHLTeam'] for team in roster_data.values() for p in team if p['Name'] == x), x) if x in roster_players else 'FA')
+                # Map logic
+                player_team_map = {p['Name']: p.get('NHLTeam', 'FA') for team in roster_data.values() for p in team}
+                df['Team'] = df['Player'].apply(lambda x: player_team_map.get(x, x) if x in roster_players else 'FA')
                 
                 if not standings_df.empty:
                     st.session_state.espn_standings = standings_df
             
             elif status == 'PRIVATE':
-                st.sidebar.error("Error: League is Private or Invalid ID. Cannot fetch rosters.")
+                status_container.error("🚫 League is Private or Invalid ID.")
                 df = st.session_state.initial_df.copy()
 
             elif status == 'FAILED_FETCH':
-                st.sidebar.error("Error fetching ESPN data. Check ID or season.")
+                status_container.error("⚠️ Error fetching data. Check ID.")
                 df = st.session_state.initial_df.copy()
 
         except Exception as e:
@@ -273,7 +285,7 @@ else:
         
         st.caption("Time filtering is only available on 'My Roster' (Tab 4) due to API performance constraints.")
 
-        # --- DATA FILTERING ---
+        # --- DATA FILTERING (Static Filters Only) ---
         filt_df = df.copy()
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
@@ -330,6 +342,7 @@ else:
             st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_order=cols_to_display, column_config=league_config)
         else:
             st.info("No player data available for the current filters or time period.")
+
 
     # ================= TAB 3: FANTASY TOOLS =================
     with tab_tools:
@@ -424,8 +437,8 @@ else:
                 trade_config = {
                     "Side": st.column_config.TextColumn("Side", pinned=True),
                     "Player": st.column_config.TextColumn("Player", pinned=True),
-                    "FP": st.column_config.NumberColumn("FP", help="Current Fantasy Points", format="%.1f"),
-                    "ROS_FP": st.column_config.NumberColumn("ROS FP", help="Rest of Season Projected FP", format="%.1f"),
+                    "FP": st.column_config.NumberColumn("FP", format="%.1f", help="Current Fantasy Points"),
+                    "ROS_FP": st.column_config.NumberColumn("ROS FP", format="%.1f", help="Rest of Season Projected FP"),
                     "G": st.column_config.NumberColumn("G", help="Current Goals"), "ROS_G": st.column_config.NumberColumn("ROS G", help="Projected Goals"),
                     "A": st.column_config.NumberColumn("A", help="Current Assists"), "ROS_A": st.column_config.NumberColumn("ROS A", help="Projected Assists"),
                     "Pts": st.column_config.NumberColumn("Pts", help="Current Points"), "ROS_Pts": st.column_config.NumberColumn("ROS Pts", help="Projected Points"),
@@ -548,7 +561,7 @@ else:
                 "SOG": st.column_config.NumberColumn("SOG", format="%.0f"),
                 "W": st.column_config.NumberColumn("W", format="%.0f"),
                 "GA": st.column_config.NumberColumn("GA", format="%.0f"),
-                "TOI": st.column_config.TextColumn("TOI", help="Time On Ice per Game"),
+                "TOI": st.column_config.TextColumn("TOI", help="Time On Ice per Game (string format)"),
                 "SHP": st.column_config.NumberColumn("SHP", format="%.0f", help="Shorthanded Points"),
                 "PPP": st.column_config.NumberColumn("PPP", format="%.0f", help="Power Play Points"),
             }
@@ -613,21 +626,20 @@ else:
             roster_dict = st.session_state.league_rosters
             team_names = list(roster_dict.keys())
             
-            # --- DISPLAY GRID (TEXT ONLY) ---
+            # Use columns for layout (max 4 per row for cleaner look)
             num_teams = len(team_names)
-            cols = st.columns(4) # 4 columns grid
+            cols = st.columns(4) 
             
             for i, team_name in enumerate(team_names):
                 roster = roster_dict[team_name]
-                
-                # Create simple dataframe for display
                 # roster is list of dicts: {'Name': '...', 'NHLTeam': '...'}
+                # Convert to simple DF
                 team_df = pd.DataFrame(roster)
                 
                 with cols[i % 4]:
                     st.subheader(team_name)
                     st.dataframe(
-                        team_df,
+                        team_df[['Name', 'NHLTeam']], # Only show Name and Team
                         use_container_width=True,
                         hide_index=True,
                         column_config={
