@@ -35,6 +35,35 @@ def remove_player(player, side):
 # --- CSS ---
 st.markdown("""
 <style>
+    /* New CSS for the Tab 5 Player Grid */
+    .league-grid-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 20px;
+    }
+    .team-roster-box {
+        padding: 15px;
+        border: 1px solid #333;
+        border-radius: 8px;
+        background-color: #1e1e1e;
+    }
+    .roster-player-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 5px;
+        padding: 5px;
+        background-color: #262730;
+        border-radius: 4px;
+        font-size: 0.9em;
+    }
+    .player-headshot {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        margin-right: 10px;
+        object-fit: cover;
+    }
+
     .game-card { background-color: #262730; border: 1px solid #41444e; border-radius: 8px; padding: 5px; text-align: center; margin: 0 auto 5px auto; max-width: 100%; box-shadow: 1px 1px 3px rgba(0,0,0,0.2); }
     .team-row { display: flex; justify-content: center; align-items: center; gap: 5px; }
     .team-info { display: flex; flex-direction: column; align-items: center; }
@@ -662,54 +691,48 @@ else:
         if st.session_state.get('league_rosters'):
             roster_dict = st.session_state.league_rosters
             team_names = list(roster_dict.keys())
-            num_teams = len(team_names)
             
-            # Max 4 columns for display consistency
-            num_cols = min(num_teams, 4) if num_teams > 0 else 1
-            max_players = max([len(roster) for roster in roster_dict.values()]) if num_teams > 0 else 1
+            # Create a combined HTML string for the entire grid
+            html_grid = ['<div class="league-grid-container">']
 
-            # Get player metadata once for efficiency
             # Create a lookup series for quick ID/Team retrieval
             player_metadata = df[['ID', 'Team']].set_index('Player')
             
-            # Create a list of columns for the Streamlit grid (max 4)
-            st_cols = st.columns(num_cols)
-            
-            # 1. RENDER TEAM NAMES (Headers)
-            for i in range(num_cols):
-                if i < num_teams:
-                    st_cols[i].subheader(team_names[i])
-            
-            # 2. RENDER PLAYERS (Grid)
-            for player_index in range(max_players):
-                player_row = st.columns(num_cols)
+            for team_name in team_names:
+                roster = roster_dict[team_name]
+                team_html = [f'<div class="team-roster-box"><h3>{team_name}</h3>']
                 
-                for team_col_index in range(num_cols):
-                    team_name = team_names[team_col_index]
-                    roster = roster_dict[team_name]
+                for p_name in roster:
                     
-                    if player_index < len(roster):
-                        p_name = roster[player_index]
+                    # 1. ROBUST LOOKUP AND FALLBACK
+                    metadata = player_metadata.loc[player_metadata.index.isin([p_name])]
+                    
+                    if not metadata.empty:
+                        pid = metadata.iloc[0]['ID']
+                        nhl_team = metadata.iloc[0]['Team']
+                        # Ensure safe URL construction
+                        pid = str(pid).strip() if pd.notna(pid) else '0'
+                        nhl_team = str(nhl_team).strip() if pd.notna(nhl_team) else 'N/A'
                         
-                        # --- ROBUST METADATA LOOKUP ---
-                        metadata = player_metadata.loc[player_metadata.index.isin([p_name])]
-                        
-                        if not metadata.empty:
-                            pid = metadata.iloc[0]['ID']
-                            nhl_team = metadata.iloc[0]['Team']
-                            # Headshot URL: Use 20252026 season and player metadata
-                            img_url = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team}/{pid}.png"
-                        else:
-                            # Fallback if player name from ESPN doesn't match NHL stats (Minor Leaguer, Prospect)
-                            img_url = "https://assets.nhle.com/mugs/nhl/default.png" 
-                        
-                        # Display Player Card
-                        with player_row[team_col_index]:
-                            st.markdown(f"""
-                            <div style='display: flex; align-items: center; margin-bottom: 5px; padding: 5px; background-color: #262730; border-radius: 4px;'>
-                                <img src="{img_url}" width="30" style="border-radius: 50%; margin-right: 10px;">
-                                <span>{p_name}</span>
-                            </div>
-                            """, unsafe_allow_html=True)
+                        img_url = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team}/{pid}.png"
+                    else:
+                        img_url = "https://assets.nhle.com/mugs/nhl/default.png" 
+                    
+                    # 2. RENDER PLAYER ITEM
+                    team_html.append(f"""
+                        <div class="roster-player-item">
+                            <img src="{img_url}" class="player-headshot">
+                            <span>{p_name}</span>
+                        </div>
+                    """)
+                
+                team_html.append('</div>')
+                html_grid.extend(team_html)
+            
+            html_grid.append('</div>')
+            
+            # Render the final HTML grid once
+            st.markdown('\n'.join(html_grid), unsafe_allow_html=True)
+            
         else:
             st.info("Enter a valid League ID in the sidebar to see full league rosters.")
