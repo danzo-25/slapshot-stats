@@ -3,6 +3,7 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta
 import pytz
+import difflib # Added for fuzzy matching
 
 # --- GENERIC FETCHER ---
 def fetch_data(endpoint, report_type, sort_key, override_cayenne=None, aggregate=False):
@@ -85,6 +86,7 @@ def load_nhl_data():
     elif df_goalies.empty: df_combined = df_sum
     else: df_combined = pd.concat([df_sum, df_goalies], ignore_index=True)
 
+    # Clean Data
     if 'Team' in df_combined.columns:
         df_combined['Team'] = df_combined['Team'].apply(lambda x: x.split(',')[-1].strip() if isinstance(x, str) else 'N/A')
     else: df_combined['Team'] = 'N/A'
@@ -246,12 +248,12 @@ def load_nhl_news():
     except Exception as e:
         return []
 
-# --- MODIFIED: RETURN LEAGUE NAME ---
+# --- NEW: UNIFIED ESPN LEAGUE FETCHER (Rosters + Standings + League Name) ---
 @st.cache_data(ttl=60)
 def fetch_espn_league_data(league_id, season_year):
     """
-    Fetches ESPN league data (Rosters + Standings + Settings).
-    Returns: roster_dict, standings_df, league_name, status
+    Fetches ESPN league data, matches player names to NHL stats, and returns 
+    rosters ready for rendering (with ID/Team attached).
     """
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -274,15 +276,35 @@ def fetch_espn_league_data(league_id, season_year):
         data, status = try_fetch(season_year - 1)
 
     if status != 'SUCCESS':
-        return {}, pd.DataFrame(), "", status
+        return {}, pd.DataFrame(), "League Rosters", status
 
     # 0. Get League Name
-    league_name = "League Rosters"
-    try:
-        league_name = data.get('settings', {}).get('name', 'League Rosters')
-    except: pass
+    league_name = data.get('settings', {}).get('name', 'League Rosters')
 
-    # 1. Parse Rosters
+    # --- Fetch Main NHL Data for Matching (Not cached here, relying on app's cached df) ---
+    # NOTE: This load is slow, but necessary for matching.
+    try:
+        nhl_df = load_nhl_data() 
+        nhl_player_names = nhl_df['Player'].tolist()
+        nhl_metadata = {row['Player']: {'ID': row['ID'], 'Team': row['Team']} for _, row in nhl_df[['Player', 'ID', 'Team']].dropna(subset=['Player']).iterrows()}
+    except:
+        nhl_player_names = []
+        nhl_metadata = {}
+    
+    # --- Helper Matching Function (Fuzzy Matching) ---
+    def find_metadata(roster_name):
+        rn = str(roster_name).strip()
+        # 1. Exact/Case-Insensitive Match
+        if rn in nhl_metadata: return nhl_metadata[rn]
+        
+        # 2. Fuzzy Match (for slight misspellings or formats like Nicklaus vs Nick)
+        candidate = difflib.get_close_matches(rn, nhl_player_names, n=1, cutoff=0.7)
+        if candidate and candidate[0] in nhl_metadata:
+            return nhl_metadata[candidate[0]]
+        
+        return None
+
+    # 1. PARSE ROSTERS and ATTACH METADATA
     roster_data = {}
     try:
         teams_map = {}
@@ -297,19 +319,27 @@ def fetch_espn_league_data(league_id, season_year):
             team_name = teams_map.get(team['id'], "Unknown")
             roster_data[team_name] = []
             entries = team.get('roster', {}).get('entries', [])
+            
             for slot in entries:
                 player_data = slot.get('playerPoolEntry', {}).get('player', {})
                 full_name = player_data.get('fullName')
+                
                 if full_name:
-                    roster_data[team_name].append(full_name)
+                    meta = find_metadata(full_name)
+                    
+                    roster_entry = {
+                        'Name': full_name,
+                        'ID': str(meta.get('ID', 0)).strip(),
+                        'NHLTeam': str(meta.get('Team', 'N/A')).strip()
+                    }
+                    roster_data[team_name].append(roster_entry)
     except:
         roster_data = {}
 
-    # 2. Parse Standings
+    # 2. PARSE STANDINGS
     standings_list = []
     try:
         for team in data.get('teams', []):
-            # Complex logic to find best team name
             abbrev = team.get('abbrev')
             location = team.get('location', '')
             nickname = team.get('nickname', '')
