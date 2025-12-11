@@ -246,52 +246,72 @@ def load_nhl_news():
     except Exception as e:
         return []
 
-# --- NEW ESPN LEAGUE FETCHER ---
-@st.cache_data(ttl=60) # Cache for 60 seconds to prevent hammering API
+# --- NEW ESPN LEAGUE FETCHER (Robust Version) ---
+@st.cache_data(ttl=60)
 def fetch_espn_roster_data(league_id, season_year):
     """
     Fetches ESPN league roster data using the League ID.
-    Returns: {Team Abbr: [Player Names]} and Status
+    Includes headers to prevent blocking and fallback logic for season year.
     """
-    # Use 2026 for 2025-2026 season data
-    url = f"https://fantasy.espn.com/apis/v3/games/fhl/seasons/{season_year}/segments/0/leagues/{league_id}"
-    
-    # Required parameters for getting roster data
-    params = {
-        'view': 'mRoster,mSettings',
+    # Define standard headers to mimic a browser
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'application/json',
     }
+    
+    # Required parameters
+    params = {'view': 'mRoster,mSettings'}
 
-    try:
-        response = requests.get(url, params=params, timeout=5)
-        
-        if response.status_code == 401:
-            # 401 Unauthorized usually means the league is private
-            return {}, 'PRIVATE'
-        
-        response.raise_for_status() # Raise error for bad status codes (e.g., 404)
-        data = response.json()
-        
-    except requests.RequestException:
-        # Handles connection errors, timeouts, 404s, etc.
-        return {}, 'FAILED_FETCH'
+    # Helper function to try a request
+    def try_fetch(year):
+        url = f"https://fantasy.espn.com/apis/v3/games/fhl/seasons/{year}/segments/0/leagues/{league_id}"
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=5)
+            if r.status_code == 200: return r.json(), 'SUCCESS'
+            if r.status_code == 401: return {}, 'PRIVATE'
+            return {}, 'ERROR'
+        except:
+            return {}, 'ERROR'
 
+    # 1. Try Primary Season (2026 for 2025-26)
+    data, status = try_fetch(season_year)
+    
+    # 2. Fallback: If 2026 fails (maybe league created early?), try 2025
+    if status == 'ERROR':
+        data, status = try_fetch(season_year - 1)
+
+    if status != 'SUCCESS':
+        return {}, status
+
+    # Parse Data
     roster_data = {}
-    
-    # 1. Get Team Names and IDs
-    member_to_team = {m['id']: m.get('displayName', f"T{m['id']}") for m in data.get('members', [])}
-    
-    # 2. Extract Rosters
-    for team in data.get('teams', []):
-        member_id = team.get('primaryOwner')
-        # Use team abbreviation if available, fallback to member name
-        team_abbr = team.get('abbrev', member_to_team.get(member_id, f"T{team.get('id')}"))
+    try:
+        # Map Member IDs to Team Names/Abbrevs
+        # Sometimes 'abbrev' is missing, so we fallback to 'nickname' or 'location'
+        teams_map = {}
+        for t in data.get('teams', []):
+            t_id = t['id']
+            # Try abbrev -> nickname -> "Team X"
+            name = t.get('abbrev')
+            if not name:
+                name = t.get('nickname')
+            if not name:
+                name = f"Team {t_id}"
+            teams_map[t_id] = name
 
-        roster_data[team_abbr] = []
-        
-        for slot in team.get('roster', {}).get('entries', []):
-            player_info = slot.get('playerPoolEntry', {}).get('player', {})
-            full_name = player_info.get('fullName')
-            if full_name:
-                roster_data[team_abbr].append(full_name)
+        # Extract Rosters
+        for team in data.get('teams', []):
+            team_name = teams_map.get(team['id'], "Unknown")
+            roster_data[team_name] = []
+            
+            entries = team.get('roster', {}).get('entries', [])
+            for slot in entries:
+                player_data = slot.get('playerPoolEntry', {}).get('player', {})
+                full_name = player_data.get('fullName')
+                if full_name:
+                    roster_data[team_name].append(full_name)
+                    
+        return roster_data, 'SUCCESS'
 
-    return roster_data, 'SUCCESS'
+    except Exception as e:
+        return {}, 'FAILED_FETCH'
