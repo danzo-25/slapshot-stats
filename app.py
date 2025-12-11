@@ -264,15 +264,13 @@ else:
         time_filter_league = col_time.selectbox("Show Activity From", ["Season (2025/26)", "Last 7 Days", "Last 15 Days", "Last 30 Days"])
 
         # --- DATA FILTERING AND AGGREGATION ---
-        
-        # Start with full season data
         filt_df = df.copy()
         
         # Apply static filters
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
 
-        # Apply time filter logic (fetch recent stats if needed)
+        # Apply time filter logic
         if time_filter_league != "Season (2025/26)":
             days_map = {"Last 7 Days": 7, "Last 15 Days": 15, "Last 30 Days": 30}
             days = days_map.get(time_filter_league, 0)
@@ -284,7 +282,6 @@ else:
                     logs = get_player_game_log(row['ID'])
                     if not logs.empty:
                         recent = logs[logs['gameDate'] >= start_date]
-                        
                         if not recent.empty:
                             stat_dict = {
                                 'ID': row['ID'], 'Player': row['Player'], 'Team': row['Team'], 'Pos': row['Pos'],
@@ -298,9 +295,9 @@ else:
                                 'BkS': recent['blockedShots'].sum() if 'blockedShots' in recent.columns else 0,
                                 'PIM': recent['pim'].sum() if 'pim' in recent.columns else 0,
                                 'W': len(recent[recent['decision'] == 'W']) if 'decision' in recent.columns else 0,
-                                'SHP': recent['shorthandedPoints'].sum() if 'shorthandedPoints' in recent.columns else 0, # Added SHP
+                                'SHP': recent['shorthandedPoints'].sum() if 'shorthandedPoints' in recent.columns else 0,
                             }
-                            # Recalculate FP for the period using sidebar weights
+                            # Recalculate FP for the period
                             fp = (stat_dict['G']*val_G + stat_dict['A']*val_A + stat_dict['PPP']*val_PPP + 
                                   stat_dict['SOG']*val_SOG + stat_dict['Hits']*val_Hit + stat_dict['BkS']*val_BkS +
                                   stat_dict['W']*val_W + (stat_dict['SHP'] * val_SHP))
@@ -309,9 +306,9 @@ else:
 
                 if recent_stats:
                     recent_df = pd.DataFrame(recent_stats)
-                    # Merge ONLY missing rate stats from df. Do NOT duplicate 'ID'.
-                    # We excluded 'ID' from base_cols to fix the error.
-                    base_cols = ['Sh%', 'FO%', 'GAA', 'SV%', 'GSAA', 'TOI'] # Removed 'ID'
+                    # Merge missing rate stats (TOI, Sh%, GAA, SV%) from season data
+                    # EXCLUDE 'ID' from base_cols to prevent duplicate column error during merge
+                    base_cols = ['Sh%', 'FO%', 'GAA', 'SV%', 'GSAA', 'TOI'] 
                     existing_base_cols = [c for c in base_cols if c in df.columns]
                     
                     if existing_base_cols:
@@ -358,11 +355,10 @@ else:
             # 2. DECIMAL AND ID FIXES
             # Moved counting stats (PPP, SHP, Hits, BkS) to whole numbers list
             whole_num_cols = ['GWG', 'GP', 'G', 'A', 'Pts', 'PIM', 'SOG', 'W', 'L', 'OTL', 'GA', 'Svs', 'SO', '+/-', 'PPP', 'SHP', 'Hits', 'BkS']
+            # Safely get valid columns present in current dataframe to avoid KeyError
             valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
-            
             styled_df = styled_df.format("{:.0f}", subset=valid_whole)
             
-            # Formatting decimal columns ONLY if they exist in the current dataframe
             valid_one_dec = [c for c in ['FP', 'ROS_FP', 'Sh%', 'FO%', 'SAT%', 'USAT%'] if c in filt_df.columns]
             styled_df = styled_df.format("{:.1f}", subset=valid_one_dec)
             
@@ -373,7 +369,7 @@ else:
             styled_df = styled_df.format("{:.3f}", subset=valid_three_dec)
             
             # Exclude ID for display.
-            cols_to_display = [c for c in filt_df.columns if c not in ['ID', 'PosType', 'GamesRemaining'] and not c.startswith('ROS_')]
+            cols_to_display = [c for c in filt_df.columns if c not in ['ID', 'PosType', 'GamesRemaining', 'ROS_FP', 'GA']]
             
             st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_order=cols_to_display, column_config=league_config)
         else:
@@ -520,20 +516,20 @@ else:
                             stat_dict = {
                                 'ID': pid, 'Player': row['Player'], 'Team': row['Team'], 'Pos': row['Pos'],
                                 'GP': len(recent),
-                                'G': recent['goals'].sum() if 'goals' in recent else 0,
-                                'A': recent['assists'].sum() if 'assists' in recent else 0,
-                                'Pts': recent['points'].sum() if 'points' in recent else 0,
-                                'SOG': recent['shots'].sum() if 'shots' in recent else 0,
-                                'PPP': recent['powerPlayPoints'].sum() if 'powerPlayPoints' in recent else 0,
-                                'Hits': recent['hits'].sum() if 'hits' in recent else 0,
-                                'BkS': recent['blockedShots'].sum() if 'blockedShots' in recent else 0,
-                                'PIM': recent['pim'].sum() if 'pim' in recent else 0,
-                                'W': len(recent[recent['decision'] == 'W']) if 'decision' in recent else 0,
-                                'SO': recent['shutouts'].sum() if 'shutouts' in recent else 0,
-                                'Svs': recent['saves'].sum() if 'saves' in recent else 0,
-                                'GA': recent['goalsAgainst'].sum() if 'goalsAgainst' in recent else 0,
-                                'L': len(recent[recent['decision'] == 'L']) if 'decision' in recent else 0,
-                                'OTL': len(recent[recent['decision'] == 'OT']) if 'decision' in recent else 0,
+                                'G': recent['goals'].sum() if 'goals' in recent.columns else 0,
+                                'A': recent['assists'].sum() if 'assists' in recent.columns else 0,
+                                'Pts': recent['points'].sum() if 'points' in recent.columns else 0,
+                                'SOG': recent['shots'].sum() if 'shots' in recent.columns else 0,
+                                'PPP': recent['powerPlayPoints'].sum() if 'powerPlayPoints' in recent.columns else 0,
+                                'Hits': recent['hits'].sum() if 'hits' in recent.columns else 0,
+                                'BkS': recent['blockedShots'].sum() if 'blockedShots' in recent.columns else 0,
+                                'PIM': recent['pim'].sum() if 'pim' in recent.columns else 0,
+                                'W': len(recent[recent['decision'] == 'W']) if 'decision' in recent.columns else 0,
+                                'SO': recent['shutouts'].sum() if 'shutouts' in recent.columns else 0,
+                                'Svs': recent['saves'].sum() if 'saves' in recent.columns else 0,
+                                'GA': recent['goalsAgainst'].sum() if 'goalsAgainst' in recent.columns else 0,
+                                'L': len(recent[recent['decision'] == 'L']) if 'decision' in recent.columns else 0,
+                                'OTL': len(recent[recent['decision'] == 'OT']) if 'decision' in recent.columns else 0,
                             }
                             fp = (stat_dict['G']*val_G + stat_dict['A']*val_A + stat_dict['PPP']*val_PPP + 
                                   stat_dict['SOG']*val_SOG + stat_dict['Hits']*val_Hit + stat_dict['BkS']*val_BkS +
@@ -555,7 +551,7 @@ else:
             
             # --- RENDER TABLE ---
             # Define all possible columns for the table (excluding ID and PosType)
-            all_possible_cols = ['Player', 'Team', 'Pos', 'FP', 'GP', 'G', 'A', 'Pts', 'GWG', 'SOG', 'Sh%', 'FO%', 'L', 'OTL', 'GAA', 'SV%', 'GSAA', 'SO', 'PIM', 'Hits', 'BkS', 'W', 'Svs', 'GA', 'TOI']
+            all_possible_cols = ['Player', 'Team', 'Pos', 'FP', 'GP', 'G', 'A', 'Pts', 'GWG', 'SOG', 'Sh%', 'FO%', 'L', 'OTL', 'GAA', 'SV%', 'GSAA', 'SO', 'PIM', 'Hits', 'BkS', 'W', 'Svs', 'GA', 'TOI', 'SHP', 'PPP']
             final_cols = [c for c in all_possible_cols if c in display_df.columns and c != 'ID'] 
             
             # 1. COLUMN CONFIG (for Tooltips & Pinning)
