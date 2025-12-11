@@ -3,8 +3,8 @@ import pandas as pd
 import altair as alt
 import re
 from datetime import datetime, timedelta
-import difflib  # For fuzzy matching
-import requests  # For URL status check
+import difflib # For fuzzy matching
+import requests # For URL status check
 from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news, fetch_espn_league_data
 
 st.set_page_config(layout="wide", page_title="Slapshot Stats")
@@ -135,7 +135,7 @@ else:
     if league_id:
         try:
             # UNIFIED FETCH: Rosters + Standings + League Name
-            roster_data, standings_df, league_name, status = fetch_espn_league_data(league_id, 2025)
+            roster_data, standings_df, league_name, status = fetch_espn_league_data(league_id, 2026)
             
             if status == 'SUCCESS':
                 st.session_state.league_name = league_name # Save dynamic name
@@ -409,6 +409,7 @@ else:
             st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_order=cols_to_display, column_config=league_config)
         else:
             st.info("No player data available for the current filters or time period.")
+
 
     # ================= TAB 3: FANTASY TOOLS =================
     with tab_tools:
@@ -688,93 +689,64 @@ else:
     # ================= TAB 5: LEAGUE ROSTERS =================
     with tab_league:
         st.header(f"Rosters for {st.session_state.league_name}")
+        
+        if st.session_state.get('league_rosters'):
+            roster_dict = st.session_state.league_rosters
+            team_names = list(roster_dict.keys())
+            
+            # Create a combined HTML string for the entire grid
+            html_grid = ['<div class="league-grid-container">']
 
-        roster_dict = st.session_state.get('league_rosters', {})
-        if not roster_dict:
-            st.info("Enter a valid League ID in the sidebar to see full league rosters.")
-        else:
-            # Build metadata map: name -> list of {ID, Team} (handles duplicates)
-            player_metadata = {}
-            for _, r in df[['Player', 'ID', 'Team']].dropna(subset=['Player']).iterrows():
-                name = str(r['Player']).strip()
-                player_metadata.setdefault(name, []).append({'ID': r['ID'], 'Team': r['Team']})
-
-            # quick lowercase map for case-insensitive match
-            lower_map = {k.lower(): k for k in player_metadata.keys()}
-
-            def find_metadata(roster_name, cutoff=0.7):
-                rn = str(roster_name).strip()
-                # exact
-                if rn in player_metadata:
-                    return player_metadata[rn][0]
-                # case-insensitive
-                if rn.lower() in lower_map:
-                    return player_metadata[lower_map[rn.lower()]][0]
-                # fuzzy
-                cand = difflib.get_close_matches(rn, player_metadata.keys(), n=1, cutoff=cutoff)
-                if cand:
-                    return player_metadata[cand[0]][0]
-                return None
-
-            # lightweight URL existence check
+            # Create a lookup series for quick ID/Team retrieval
+            # Use dictionary comprehension for faster, safer lookups
+            player_metadata = {row['Player']: {'ID': row['ID'], 'Team': row['Team']} for _, row in df[['Player', 'ID', 'Team']].dropna(subset=['Player']).iterrows()}
+            
+            # --- Helper to check image URL status (required for robust fallback) ---
             def url_ok(url, timeout=0.5):
                 try:
-                    resp = requests.head(url, timeout=timeout)
+                    # Using minimal timeout for faster user experience
+                    resp = requests.head(url, timeout=timeout) 
                     return resp.status_code == 200
                 except Exception:
                     return False
-
-            # Reliable fallback placeholder (visible)
-            fallback_img = "https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg"
-
-            team_names = list(roster_dict.keys())
-            num_cols = min(4, max(1, len(team_names)))
-            cols = st.columns(num_cols)
-
-            # Render each team into grid columns (wrap teams if more than num_cols)
-            for idx, team_name in enumerate(team_names):
-                col = cols[idx % num_cols]
-                with col:
-                    st.subheader(team_name)
-                    roster = roster_dict.get(team_name, [])
-                    if not roster:
-                        st.write("_No players_")
-                        continue
-
-                    for p_name in roster:
-                        meta = find_metadata(p_name)
-                        img_url = fallback_img
-                        if meta and pd.notna(meta['ID']):
-                            pid = str(meta['ID']).strip()
-                            nhl_team = str(meta['Team']).strip() if pd.notna(meta.get('Team')) else ''
-                            # common path with team + pid
-                            if nhl_team:
-                                candidate = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team}/{pid}.png"
-                                if url_ok(candidate):
-                                    img_url = candidate
-                                else:
-                                    # try without team folder
-                                    candidate2 = f"https://assets.nhle.com/mugs/nhl/20252026/{pid}.png"
-                                    img_url = candidate2 if url_ok(candidate2) else fallback_img
-                            else:
-                                candidate2 = f"https://assets.nhle.com/mugs/nhl/20252026/{pid}.png"
-                                img_url = candidate2 if url_ok(candidate2) else fallback_img
-
-                        # render compact row using two narrow columns (img + name)
-                        try:
-                            row_cols = st.columns([0.18, 0.82])
-                            with row_cols[0]:
-                                st.image(img_url, width=36)
-                            with row_cols[1]:
-                                st.write(p_name)
-                        except Exception:
-                            st.markdown(f'<div style="display:flex; align-items:center;"><img src="{img_url}" width="36" style="border-radius:50%; margin-right:8px;">{p_name}</div>', unsafe_allow_html=True)
-
-            # Diagnostic summary: unmatched roster names
-            unmatched = [p for team in roster_dict.values() for p in team if not find_metadata(p)]
-            if unmatched:
-                st.warning(f"{len(unmatched)} roster names had no match in df['Player'] (showing up to 30). Consider adding normalization rules or a manual mapping.")
-                st.write(unmatched[:30])
-            else:
-                st.success("All roster names mapped (exact/case-insensitive/fuzzy) to players in df.")
-
+            
+            fallback_img = "https://assets.nhle.com/mugs/nhl/default.png"
+            
+            for team_name in team_names:
+                roster = roster_dict[team_name]
+                team_html = [f'<div class="team-roster-box"><h3>{team_name}</h3>']
+                
+                for p_name in roster:
+                    
+                    meta = player_metadata.get(p_name)
+                    img_url = fallback_img
+                    
+                    if meta and pd.notna(meta['ID']) and pd.notna(meta['Team']):
+                        pid = str(meta['ID']).strip()
+                        nhl_team = str(meta['Team']).strip()
+                        
+                        potential_url = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team}/{pid}.png"
+                        
+                        # Only check if URL seems plausible
+                        if pid != '0' and nhl_team != 'N/A':
+                             if url_ok(potential_url):
+                                img_url = potential_url
+                    
+                    # RENDER PLAYER ITEM
+                    team_html.append(f"""
+                        <div class="roster-player-item">
+                            <img src="{img_url}" class="player-headshot">
+                            <span>{p_name}</span>
+                        </div>
+                    """)
+                
+                team_html.append('</div>')
+                html_grid.extend(team_html)
+            
+            html_grid.append('</div>')
+            
+            # Render the final HTML grid once
+            st.markdown('\n'.join(html_grid), unsafe_allow_html=True)
+            
+        else:
+            st.info("Enter a valid League ID in the sidebar to see full league rosters.")
