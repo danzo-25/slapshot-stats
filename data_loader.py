@@ -119,27 +119,35 @@ def get_player_game_log(player_id):
         return df_log.sort_values(by='gameDate')
     except: return pd.DataFrame()
 
+# --- MODIFIED: Load Schedule with Timezone Awareness ---
 @st.cache_data(ttl=60)
 def load_schedule():
-    url = "https://api-web.nhle.com/v1/schedule/now"
+    # Set timezone to US/Eastern
+    est_tz = pytz.timezone('US/Eastern')
+    
+    # Get current EST date (to ensure we query the correct date, not UTC date)
+    now_est = datetime.now(pytz.utc).astimezone(est_tz)
+    today_est_str = now_est.strftime("%Y-%m-%d")
+
+    # Use the explicit date in the API call to avoid API confusion
+    url = f"https://api-web.nhle.com/v1/schedule/{today_est_str}"
+    
     try:
         response = requests.get(url, timeout=5)
         response.raise_for_status()
         data = response.json()
-        today_str = datetime.now().strftime("%Y-%m-%d")
         
-        todays_games = []
-        for day in data.get('gameWeek', []):
-            if day['date'] == today_str:
-                todays_games = day.get('games', [])
-                break
+        # The new V1 API structure is already keyed by date
+        todays_games = data.get('gameWeek', [{}])[0].get('games', [])
         
         processed_games = []
         for g in todays_games:
+            # Time Calc
             utc_time = datetime.strptime(g['startTimeUTC'], "%Y-%m-%dT%H:%M:%SZ")
             utc_time = utc_time.replace(tzinfo=pytz.utc)
-            est_time = utc_time.astimezone(pytz.timezone('US/Eastern'))
+            est_time = utc_time.astimezone(est_tz)
             
+            # --- LIVE SCORE LOGIC ---
             game_state = g.get('gameState', 'FUT')
             status_text = est_time.strftime("%I:%M %p EST")
             is_live = False
@@ -252,8 +260,8 @@ def load_nhl_news():
 @st.cache_data(ttl=60)
 def fetch_espn_league_data(league_id, season_year):
     """
-    Fetches ESPN league data, matches player names to NHL stats, and returns 
-    rosters ready for rendering (with ID/Team attached).
+    Fetches ESPN league data, matches player names to NHL stats using fuzzy matching, 
+    and returns rosters ready for rendering (with ID/Team attached).
     """
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -281,8 +289,7 @@ def fetch_espn_league_data(league_id, season_year):
     # 0. Get League Name
     league_name = data.get('settings', {}).get('name', 'League Rosters')
 
-    # --- Fetch Main NHL Data for Matching (Not cached here, relying on app's cached df) ---
-    # NOTE: This load is slow, but necessary for matching.
+    # --- Fetch Main NHL Data for Matching (Needs full access to players) ---
     try:
         nhl_df = load_nhl_data() 
         nhl_player_names = nhl_df['Player'].tolist()
@@ -297,7 +304,7 @@ def fetch_espn_league_data(league_id, season_year):
         # 1. Exact/Case-Insensitive Match
         if rn in nhl_metadata: return nhl_metadata[rn]
         
-        # 2. Fuzzy Match (for slight misspellings or formats like Nicklaus vs Nick)
+        # 2. Fuzzy Match 
         candidate = difflib.get_close_matches(rn, nhl_player_names, n=1, cutoff=0.7)
         if candidate and candidate[0] in nhl_metadata:
             return nhl_metadata[candidate[0]]
