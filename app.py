@@ -235,7 +235,7 @@ else:
             with c3: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
             with c4: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
 
-    # ================= TAB 2: ANALYTICS =================
+    # ================= TAB 2: ANALYTICS (League Summary) =================
     with tab_analytics:
         st.header("📈 Breakout Detector")
         skater_options = df[df['PosType'] == 'Skater'].sort_values('Pts', ascending=False)
@@ -248,33 +248,121 @@ else:
                 game_log['Rolling Points'] = game_log['points'].rolling(window=5, min_periods=1).mean()
                 chart_data = game_log[['gameDate', 'points', 'Rolling Points']].set_index('gameDate')
                 st.line_chart(chart_data, color=["#d3d3d3", "#ff4b4b"])
+        
         st.divider()
         st.subheader("League Summary")
-        with st.expander("Filter Options"):
+        
+        # --- NEW: TIME FILTER FOR LEAGUE SUMMARY ---
+        col_filters, col_time = st.columns([3, 1])
+        with col_filters.expander("Filter Options"):
             c1, c2 = st.columns(2)
             teams = sorted(df['Team'].unique())
             sel_teams = c1.multiselect("Team", teams, default=teams)
             pos = sorted(df['Pos'].unique())
             sel_pos = c2.multiselect("Position", pos, default=pos)
+        
+        time_filter_league = col_time.selectbox("Show Activity From", ["Season (2025/26)", "Last 7 Days", "Last 15 Days", "Last 30 Days"])
+
+        # --- DATA FILTERING AND AGGREGATION ---
+        
+        # Start with full season data
         filt_df = df.copy()
+        
+        # Apply static filters
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
+
+        # Apply time filter logic (fetch recent stats if needed)
+        if time_filter_league != "Season (2025/26)":
+            days_map = {"Last 7 Days": 7, "Last 15 Days": 15, "Last 30 Days": 30}
+            days = days_map.get(time_filter_league, 0)
+            start_date = datetime.now() - timedelta(days=days)
+            
+            with st.spinner(f"Aggregating league activity for last {days} days..."):
+                recent_stats = []
+                # Only iterate over players who passed static team/pos filters
+                for _, row in filt_df.iterrows():
+                    logs = get_player_game_log(row['ID'])
+                    if not logs.empty:
+                        recent = logs[logs['gameDate'] >= start_date]
+                        
+                        # Only include players who have activity in this period
+                        if not recent.empty:
+                            stat_dict = {
+                                'ID': row['ID'], 'Player': row['Player'], 'Team': row['Team'], 'Pos': row['Pos'],
+                                'GP': len(recent),
+                                'G': recent['goals'].sum() if 'goals' in recent.columns else 0,
+                                'A': recent['assists'].sum() if 'assists' in recent.columns else 0,
+                                'Pts': recent['points'].sum() if 'points' in recent.columns else 0,
+                                'SOG': recent['shots'].sum() if 'shots' in recent.columns else 0,
+                                # ... (add other required aggregated stats if needed)
+                            }
+                            # NOTE: For simplicity and speed, we only calculate basic counting stats for league-wide rolling filter.
+                            recent_stats.append(stat_dict)
+
+                if recent_stats:
+                    # Create temporary df for display
+                    recent_df = pd.DataFrame(recent_stats)
+                    # Merge full season stats back in for missing rate stats (Sh%, GAA, etc.)
+                    base_cols = ['ID', 'Sh%', 'FO%', 'GAA', 'SV%', 'GSAA', 'TOI']
+                    existing_base_cols = [c for c in base_cols if c in df.columns]
+                    
+                    if existing_base_cols:
+                        recent_df = recent_df.merge(df[['ID'] + existing_base_cols], on='ID', how='left')
+                    
+                    # Recalculate FP for the period using sidebar weights
+                    recent_df['FP'] = ((recent_df.get('G',0)*val_G) + (recent_df.get('A',0)*val_A) + (recent_df.get('SOG',0)*val_SOG)).round(1) 
+                    
+                    filt_df = recent_df
+                else:
+                    filt_df = pd.DataFrame() # Show empty table if no recent activity
+
+        # --- RENDER TABLE ---
         def highlight_my_team(row):
             return ['background-color: #574d28'] * len(row) if row['Player'] in st.session_state.my_roster else [''] * len(row)
-        styled_df = filt_df.style.apply(highlight_my_team, axis=1)
         
-        # Define all possible whole number columns including L and TOI (for formatting)
-        whole_num_cols = ['GWG', 'GP', 'G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SO', 'OTL', '+/-', 'L'] 
-        valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
-        
-        styled_df = styled_df.format("{:.0f}", subset=valid_whole)
-        styled_df = styled_df.format("{:.1f}", subset=[c for c in ['FP', 'ROS_FP', 'Sh%', 'FO%', 'SAT%', 'USAT%'] if c in filt_df.columns])
-        styled_df = styled_df.format("{:.2f}", subset=[c for c in ['GAA', 'GSAA'] if c in filt_df.columns])
-        styled_df = styled_df.format("{:.3f}", subset=[c for c in ['SV%'] if c in filt_df.columns])
-        
-        # Exclude ID for display. TOI is handled by default (as it's a string from the API).
-        cols = ['Player', 'Team', 'Pos', 'FP', 'ROS_FP'] + [c for c in df.columns if c not in ['ID', 'Player', 'Team', 'Pos', 'FP', 'PosType', 'ROS_FP', 'GamesRemaining'] and not c.startswith('ROS_')]
-        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_order=cols)
+        if not filt_df.empty:
+            styled_df = filt_df.style.apply(highlight_my_team, axis=1)
+            
+            # 1. TOOLTIP CONFIGURATION (Ensuring all columns have definitions)
+            league_config = {
+                "Player": st.column_config.TextColumn("Player", pinned=True, help="Player Name"),
+                "Team": st.column_config.TextColumn("Team", help="NHL Team"),
+                "Pos": st.column_config.TextColumn("Pos", help="Position"),
+                "FP": st.column_config.NumberColumn("FP", format="%.1f", help="Fantasy Points"),
+                "GP": st.column_config.NumberColumn("GP", format="%.0f", help="Games Played"),
+                "G": st.column_config.NumberColumn("G", format="%.0f", help="Goals"),
+                "A": st.column_config.NumberColumn("A", format="%.0f", help="Assists"),
+                "Pts": st.column_config.NumberColumn("Pts", format="%.0f", help="Points"),
+                "SOG": st.column_config.NumberColumn("SOG", format="%.0f", help="Shots on Goal"),
+                "L": st.column_config.NumberColumn("L", format="%.0f", help="Losses"), # FIX: L formatting
+                "TOI": st.column_config.TextColumn("TOI", help="Time On Ice per Game"), # FIX: TOI formatting
+                "GWG": st.column_config.NumberColumn("GWG", format="%.0f", help="Game Winning Goals"),
+                "PIM": st.column_config.NumberColumn("PIM", format="%.0f", help="Penalty Minutes"),
+                "W": st.column_config.NumberColumn("W", format="%.0f", help="Wins"),
+                "SV%": st.column_config.NumberColumn("SV%", format="%.3f", help="Save Percentage"),
+                "GAA": st.column_config.NumberColumn("GAA", format="%.2f", help="Goals Against Average"),
+                "GSAA": st.column_config.NumberColumn("GSAA", format="%.2f", help="Goals Saved Above Average"),
+                "Sh%": st.column_config.NumberColumn("Sh%", format="%.1f", help="Shooting Percentage"),
+                # Add more relevant columns for completeness
+            }
+            
+            # 2. DECIMAL AND ID FIXES
+            whole_num_cols = ['GWG', 'GP', 'G', 'A', 'Pts', 'PIM', 'SOG', 'W', 'L', 'OTL', 'GA', 'Svs', 'SO', '+/-']
+            valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
+            
+            styled_df = styled_df.format("{:.0f}", subset=valid_whole)
+            styled_df = styled_df.format("{:.1f}", subset=[c for c in ['FP', 'ROS_FP', 'Sh%', 'FO%', 'SAT%', 'USAT%'] if c in filt_df.columns])
+            styled_df = styled_df.format("{:.2f}", subset=[c for c in ['GAA', 'GSAA'] if c in filt_df.columns])
+            styled_df = styled_df.format("{:.3f}", subset=[c for c in ['SV%'] if c in filt_df.columns])
+            
+            # Exclude ID for display.
+            cols_to_display = [c for c in filt_df.columns if c not in ['ID', 'PosType', 'GamesRemaining'] and not c.startswith('ROS_')]
+            
+            st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600, column_order=cols_to_display, column_config=league_config)
+        else:
+            st.info("No player data available for the current filters or time period.")
+
 
     # ================= TAB 3: FANTASY TOOLS =================
     with tab_tools:
@@ -416,20 +504,20 @@ else:
                             stat_dict = {
                                 'ID': pid, 'Player': row['Player'], 'Team': row['Team'], 'Pos': row['Pos'],
                                 'GP': len(recent),
-                                'G': recent['goals'].sum() if 'goals' in recent else 0,
-                                'A': recent['assists'].sum() if 'assists' in recent else 0,
-                                'Pts': recent['points'].sum() if 'points' in recent else 0,
-                                'SOG': recent['shots'].sum() if 'shots' in recent else 0,
-                                'PPP': recent['powerPlayPoints'].sum() if 'powerPlayPoints' in recent else 0,
-                                'Hits': recent['hits'].sum() if 'hits' in recent else 0,
-                                'BkS': recent['blockedShots'].sum() if 'blockedShots' in recent else 0,
-                                'PIM': recent['pim'].sum() if 'pim' in recent else 0,
-                                'W': len(recent[recent['decision'] == 'W']) if 'decision' in recent else 0,
-                                'SO': recent['shutouts'].sum() if 'shutouts' in recent else 0,
-                                'Svs': recent['saves'].sum() if 'saves' in recent else 0,
-                                'GA': recent['goalsAgainst'].sum() if 'goalsAgainst' in recent else 0,
-                                'L': len(recent[recent['decision'] == 'L']) if 'decision' in recent else 0,
-                                'OTL': len(recent[recent['decision'] == 'OT']) if 'decision' in recent else 0,
+                                'G': recent['goals'].sum() if 'goals' in recent.columns else 0,
+                                'A': recent['assists'].sum() if 'assists' in recent.columns else 0,
+                                'Pts': recent['points'].sum() if 'points' in recent.columns else 0,
+                                'SOG': recent['shots'].sum() if 'shots' in recent.columns else 0,
+                                'PPP': recent['powerPlayPoints'].sum() if 'powerPlayPoints' in recent.columns else 0,
+                                'Hits': recent['hits'].sum() if 'hits' in recent.columns else 0,
+                                'BkS': recent['blockedShots'].sum() if 'blockedShots' in recent.columns else 0,
+                                'PIM': recent['pim'].sum() if 'pim' in recent.columns else 0,
+                                'W': len(recent[recent['decision'] == 'W']) if 'decision' in recent.columns else 0,
+                                'SO': recent['shutouts'].sum() if 'shutouts' in recent.columns else 0,
+                                'Svs': recent['saves'].sum() if 'saves' in recent.columns else 0,
+                                'GA': recent['goalsAgainst'].sum() if 'goalsAgainst' in recent.columns else 0,
+                                'L': len(recent[recent['decision'] == 'L']) if 'decision' in recent.columns else 0,
+                                'OTL': len(recent[recent['decision'] == 'OT']) if 'decision' in recent.columns else 0,
                             }
                             fp = (stat_dict['G']*val_G + stat_dict['A']*val_A + stat_dict['PPP']*val_PPP + 
                                   stat_dict['SOG']*val_SOG + stat_dict['Hits']*val_Hit + stat_dict['BkS']*val_BkS +
@@ -477,12 +565,13 @@ else:
                 "SOG": st.column_config.NumberColumn("SOG", format="%.0f"),
                 "W": st.column_config.NumberColumn("W", format="%.0f"),
                 "GA": st.column_config.NumberColumn("GA", format="%.0f"),
-                "TOI": st.column_config.TextColumn("TOI", help="Time on Ice per Game (string format)")
+                "TOI": st.column_config.TextColumn("TOI", help="Time On Ice per Game (string format)"),
+                "SHP": st.column_config.NumberColumn("SHP", format="%.0f", help="Shorthanded Points"),
+                "PPP": st.column_config.NumberColumn("PPP", format="%.0f", help="Power Play Points"),
             }
             
             # 2. STYLING (for Decimal Control - ONLY apply to existing columns)
-            # Define all possible whole number columns
-            full_whole_num_cols = ['G', 'A', 'Pts', 'GWG', 'SOG', 'L', 'OTL', 'SO', 'GP', 'PIM', 'Hits', 'BkS', 'W', 'GA', 'Svs']
+            full_whole_num_cols = ['G', 'A', 'Pts', 'GWG', 'SOG', 'L', 'OTL', 'SO', 'GP', 'PIM', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SHP', 'PPP']
             
             # Filter the list to only include columns currently in the DataFrame (display_df)
             valid_whole = [c for c in full_whole_num_cols if c in display_df.columns]
