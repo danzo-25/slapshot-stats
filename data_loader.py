@@ -8,7 +8,6 @@ import pytz
 def fetch_data(endpoint, report_type, sort_key, override_cayenne=None, aggregate=False):
     url = f"https://api.nhle.com/stats/rest/en/{endpoint}/{report_type}"
     
-    # User specified 2025-2026 Season
     if override_cayenne:
         cayenne_exp = override_cayenne
     else:
@@ -86,7 +85,6 @@ def load_nhl_data():
     elif df_goalies.empty: df_combined = df_sum
     else: df_combined = pd.concat([df_sum, df_goalies], ignore_index=True)
 
-    # Clean Data
     if 'Team' in df_combined.columns:
         df_combined['Team'] = df_combined['Team'].apply(lambda x: x.split(',')[-1].strip() if isinstance(x, str) else 'N/A')
     else: df_combined['Team'] = 'N/A'
@@ -105,8 +103,8 @@ def load_nhl_data():
     
     return df_combined[final_cols]
 
-# --- MODIFIED: LOWER TTL FOR GAME LOGS TO FIX STALE DATA ---
-@st.cache_data(ttl=600) # Changed from 3600 to 600 (10 mins)
+# --- MODIFIED: CACHE SET TO 10 MINS (600s) ---
+@st.cache_data(ttl=600)
 def get_player_game_log(player_id):
     url = f"https://api-web.nhle.com/v1/player/{player_id}/game-log/20252026/2"
     try:
@@ -137,12 +135,10 @@ def load_schedule():
         
         processed_games = []
         for g in todays_games:
-            # Time Calc
             utc_time = datetime.strptime(g['startTimeUTC'], "%Y-%m-%dT%H:%M:%SZ")
             utc_time = utc_time.replace(tzinfo=pytz.utc)
             est_time = utc_time.astimezone(pytz.timezone('US/Eastern'))
             
-            # --- LIVE SCORE LOGIC ---
             game_state = g.get('gameState', 'FUT')
             status_text = est_time.strftime("%I:%M %p EST")
             is_live = False
@@ -251,19 +247,20 @@ def load_nhl_news():
     except Exception as e:
         return []
 
-# --- ESPN ROSTER FETCHER ---
+# --- NEW: UNIFIED ESPN LEAGUE FETCHER (Rosters + Standings) ---
 @st.cache_data(ttl=60)
-def fetch_espn_roster_data(league_id, season_year):
+def fetch_espn_league_data(league_id, season_year):
     """
-    Fetches ESPN league roster data using the League ID.
-    Includes headers to prevent blocking and fallback logic for season year.
+    Fetches both Rosters and Standings in a single API call.
+    Returns: roster_dict, standings_df, status
     """
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Accept': 'application/json',
     }
     
-    params = {'view': 'mRoster,mSettings'}
+    # Request multiple views at once: mRoster, mSettings, mTeam (for standings)
+    params = {'view': 'mRoster,mSettings,mTeam'}
 
     def try_fetch(year):
         url = f"https://fantasy.espn.com/apis/v3/games/fhl/seasons/{year}/segments/0/leagues/{league_id}"
@@ -275,93 +272,59 @@ def fetch_espn_roster_data(league_id, season_year):
         except:
             return {}, 'ERROR'
 
+    # Try 2026, fallback to 2025
     data, status = try_fetch(season_year)
     if status == 'ERROR':
         data, status = try_fetch(season_year - 1)
 
     if status != 'SUCCESS':
-        return {}, status
+        return {}, pd.DataFrame(), status
 
+    # 1. PARSE ROSTERS
     roster_data = {}
+    teams_map = {}
+    
     try:
-        teams_map = {}
+        # Create Map: Team ID -> Team Name
         for t in data.get('teams', []):
             t_id = t['id']
             name = t.get('abbrev')
-            if not name:
-                name = t.get('nickname')
-            if not name:
-                name = f"Team {t_id}"
+            if not name: name = t.get('nickname')
+            if not name: name = f"Team {t_id}"
             teams_map[t_id] = name
 
+        # Fill Roster Dict
         for team in data.get('teams', []):
             team_name = teams_map.get(team['id'], "Unknown")
             roster_data[team_name] = []
+            
             entries = team.get('roster', {}).get('entries', [])
             for slot in entries:
                 player_data = slot.get('playerPoolEntry', {}).get('player', {})
                 full_name = player_data.get('fullName')
                 if full_name:
                     roster_data[team_name].append(full_name)
-                    
-        return roster_data, 'SUCCESS'
+    except:
+        roster_data = {}
 
-    except Exception as e:
-        return {}, 'FAILED_FETCH'
-
-# --- FETCH LEAGUE STANDINGS ---
-@st.cache_data(ttl=60)
-def fetch_espn_standings(league_id, season_year):
-    """
-    Fetches ESPN league standings (mTeam view).
-    Returns a DataFrame with Team Name, Wins, Losses, and Rank.
-    """
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'application/json',
-    }
-    
-    params = {'view': 'mTeam'}
-
-    def try_fetch(year):
-        url = f"https://fantasy.espn.com/apis/v3/games/fhl/seasons/{year}/segments/0/leagues/{league_id}"
-        try:
-            r = requests.get(url, params=params, headers=headers, timeout=5)
-            if r.status_code == 200: return r.json(), 'SUCCESS'
-            return {}, 'ERROR'
-        except:
-            return {}, 'ERROR'
-
-    data, status = try_fetch(season_year)
-    if status == 'ERROR':
-        data, status = try_fetch(season_year - 1)
-
-    if status != 'SUCCESS':
-        return pd.DataFrame()
-
+    # 2. PARSE STANDINGS
+    standings_list = []
     try:
-        standings_list = []
         for team in data.get('teams', []):
-            abbrev = team.get('abbrev')
-            location = team.get('location', '')
-            nickname = team.get('nickname', '')
+            team_name = teams_map.get(team['id'], f"Team {team['id']}")
             
-            if location and nickname:
-                full_name = f"{location} {nickname}"
-            elif abbrev:
-                full_name = abbrev
-            else:
-                full_name = f"Team {team.get('id')}"
-
+            # Record
             record = team.get('record', {}).get('overall', {})
             wins = record.get('wins', 0)
             losses = record.get('losses', 0)
             ties = record.get('ties', 0)
+            
+            # Rank (playoffSeed is usually best for active standings)
             rank = team.get('playoffSeed', team.get('rankCalculatedFinal', 0))
 
             standings_list.append({
                 'Rank': rank,
-                'Team': full_name,
+                'Team': team_name,
                 'W': wins,
                 'L': losses,
                 'T': ties
@@ -370,8 +333,8 @@ def fetch_espn_standings(league_id, season_year):
         df_standings = pd.DataFrame(standings_list)
         if not df_standings.empty:
             df_standings = df_standings.sort_values(by='Rank', ascending=True)
-        
-        return df_standings
+            
+    except:
+        df_standings = pd.DataFrame()
 
-    except Exception:
-        return pd.DataFrame()
+    return roster_data, df_standings, 'SUCCESS'
