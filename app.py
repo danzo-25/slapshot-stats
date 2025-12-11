@@ -3,8 +3,6 @@ import pandas as pd
 import altair as alt
 import re
 from datetime import datetime, timedelta
-import difflib # For fuzzy matching
-import requests # For URL status check
 from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news, fetch_espn_league_data
 
 st.set_page_config(layout="wide", page_title="Slapshot Stats")
@@ -698,19 +696,7 @@ else:
             html_grid = ['<div class="league-grid-container">']
 
             # Create a lookup series for quick ID/Team retrieval
-            # Use dictionary comprehension for faster, safer lookups
-            player_metadata = {row['Player']: {'ID': row['ID'], 'Team': row['Team']} for _, row in df[['Player', 'ID', 'Team']].dropna(subset=['Player']).iterrows()}
-            
-            # --- Helper to check image URL status (required for robust fallback) ---
-            def url_ok(url, timeout=0.5):
-                try:
-                    # Using minimal timeout for faster user experience
-                    resp = requests.head(url, timeout=timeout) 
-                    return resp.status_code == 200
-                except Exception:
-                    return False
-            
-            fallback_img = "https://assets.nhle.com/mugs/nhl/default.png"
+            player_metadata = df[['ID', 'Team']].set_index('Player')
             
             for team_name in team_names:
                 roster = roster_dict[team_name]
@@ -718,21 +704,21 @@ else:
                 
                 for p_name in roster:
                     
-                    meta = player_metadata.get(p_name)
-                    img_url = fallback_img
+                    # 1. ROBUST LOOKUP AND FALLBACK
+                    metadata = player_metadata.loc[player_metadata.index.isin([p_name])]
                     
-                    if meta and pd.notna(meta['ID']) and pd.notna(meta['Team']):
-                        pid = str(meta['ID']).strip()
-                        nhl_team = str(meta['Team']).strip()
+                    if not metadata.empty:
+                        pid = metadata.iloc[0]['ID']
+                        nhl_team = metadata.iloc[0]['Team']
+                        # Ensure safe URL construction
+                        pid = str(pid).strip() if pd.notna(pid) else '0'
+                        nhl_team = str(nhl_team).strip() if pd.notna(nhl_team) else 'N/A'
                         
-                        potential_url = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team}/{pid}.png"
-                        
-                        # Only check if URL seems plausible
-                        if pid != '0' and nhl_team != 'N/A':
-                             if url_ok(potential_url):
-                                img_url = potential_url
+                        img_url = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team}/{pid}.png"
+                    else:
+                        img_url = "https://assets.nhle.com/mugs/nhl/default.png" 
                     
-                    # RENDER PLAYER ITEM
+                    # 2. RENDER PLAYER ITEM
                     team_html.append(f"""
                         <div class="roster-player-item">
                             <img src="{img_url}" class="player-headshot">
