@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timedelta
 import requests
 import difflib # For fuzzy matching
-from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news, fetch_espn_league_data
+from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news, fetch_espn_league_data, fetch_nhl_standings
 
 st.set_page_config(layout="wide", page_title="Slapshot Stats")
 st.title("🏒 Slapshot Stats")
@@ -49,7 +49,7 @@ st.markdown("""
         border: 1px solid #333;
         border-radius: 8px;
         background-color: #1e1e1e;
-        min-height: 400px; /* Ensure structure is visible even if rosters are small */
+        min-height: 400px;
     }
     .roster-player-item {
         display: flex;
@@ -140,8 +140,8 @@ else:
             roster_data, standings_df, league_name, status = fetch_espn_league_data(league_id, 2026)
             
             if status == 'SUCCESS':
-                st.session_state.league_name = league_name # Save dynamic name
-                st.session_state.league_rosters = roster_data # Save for Tab 5
+                st.session_state.league_name = league_name 
+                st.session_state.league_rosters = roster_data 
 
                 # Update Rosters
                 roster_players = [p['Name'] for team in roster_data.values() for p in team]
@@ -180,6 +180,10 @@ else:
     # --- TABS (NOW 5) ---
     tab_label_5 = f"🏆 {st.session_state.league_name}"
     tab_home, tab_analytics, tab_tools, tab_fantasy, tab_league = st.tabs(["🏠 Home", "📊 Data & Analytics", "🛠️ Fantasy Tools", "⚔️ My Fantasy Team", tab_label_5])
+    tab_standings_nhl = tab_league
+    
+    # Renaming the existing dynamic tab to be the new NHL Standings tab
+    tab_league = tab_home # This is just a dummy reassignment to manage the flow below
 
     # ================= TAB 1: HOME =================
     with tab_home:
@@ -307,7 +311,6 @@ else:
             pos = sorted(df['Pos'].unique())
             sel_pos = c2.multiselect("Position", pos, default=pos)
         
-        # REMOVED TIME FILTER FROM LEAGUE SUMMARY DUE TO PERFORMANCE CRASH
         st.caption("Time filtering is only available on 'My Roster' (Tab 4) due to API performance constraints.")
 
         # --- DATA FILTERING (Static Filters Only) ---
@@ -644,7 +647,7 @@ else:
             else:
                 st.caption("Not enough data to analyze recent trends (Need 5+ games).")
 
-    # ================= TAB 5: LEAGUE ROSTERS =================
+    # ================= TAB 5: LEAGUE ROSTERS (Dynamic Name) =================
     with tab_league:
         st.header(f"Rosters for {st.session_state.league_name}")
         
@@ -655,7 +658,6 @@ else:
             # Create a combined HTML string for the entire grid
             html_grid = ['<div class="league-grid-container">']
 
-            # Helper to generate a placeholder image
             fallback_img = "https://assets.nhle.com/mugs/nhl/default.png"
             
             for team_name in team_names:
@@ -664,7 +666,6 @@ else:
                 
                 for player_entry in roster:
                     
-                    # Data is pre-matched in the backend: player_entry = {'Name': ..., 'ID': ..., 'NHLTeam': ...}
                     p_name = player_entry.get('Name', 'Unknown Player')
                     pid = player_entry.get('ID', '0')
                     nhl_team = player_entry.get('NHLTeam', 'N/A')
@@ -693,3 +694,80 @@ else:
             
         else:
             st.info("Enter a valid League ID in the sidebar to see full league rosters.")
+
+    # ================= TAB 6: NHL STANDINGS =================
+    with tab_standings_nhl:
+        st.header("🏒 NHL Standings")
+        
+        view_type = st.radio(
+            "Select View",
+            ('League (Overall)', 'Conference', 'Division'),
+            horizontal=True
+        )
+        
+        # Determine API call parameter
+        standings_view = view_type.split(' ')[0] # 'League', 'Conference', 'Division'
+        
+        standings_data = fetch_nhl_standings(standings_view)
+        
+        if not standings_data.empty:
+            
+            # --- RENDER STANDINGS TABLE ---
+            
+            # Add a combined Team + Icon column for rendering
+            standings_data['Team Icon'] = standings_data.apply(
+                lambda row: f"""<div style='display: flex; align-items: center; white-space: nowrap;'>
+                                    <img src="{row['Icon']}" width="30" style="margin-right: 10px;">
+                                    {row['Team']}
+                                </div>""", 
+                axis=1
+            )
+            
+            # Define columns to display
+            display_cols = ['Rank', 'Team Icon', 'GP', 'W', 'L', 'OTL', 'PTS', 'P%']
+            
+            # If not League view, show the grouping (Conference/Division name)
+            if standings_view != 'League':
+                st.subheader(f"Grouping: {standings_view}s")
+                # Group by Conference/Division and iterate to display separate tables
+                for group_name, group_data in standings_data.groupby('Group'):
+                    st.markdown(f"#### {group_name}")
+                    
+                    group_data = group_data[display_cols].reset_index(drop=True)
+                    
+                    # Tooltip/Column Config
+                    config = {
+                        'Rank': st.column_config.TextColumn("Rank", width="small", help="Playoff Rank"),
+                        'Team Icon': st.column_config.TextColumn("Team", width="large", help="Team Name"),
+                        'P%': st.column_config.NumberColumn("P%", format="%.3f", help="Point Percentage"),
+                    }
+                    
+                    # Styling for the table
+                    styled_group = group_data.style.format({
+                        'P%': '{:.3f}',
+                        'W': '{:.0f}', 'L': '{:.0f}', 'OTL': '{:.0f}', 'PTS': '{:.0f}'
+                    }).apply_index(lambda x: 'font-weight: bold', axis=1) # Bold headers
+                    
+                    # Render table using markdown text for the Icon column
+                    st.markdown(styled_group.to_html(), unsafe_allow_html=True)
+                    
+            else: # League (Overall) View
+                
+                league_data = standings_data[display_cols]
+                config = {
+                    'Rank': st.column_config.NumberColumn("Rank", width="small", help="Playoff Rank"),
+                    'Team Icon': st.column_config.TextColumn("Team", width="large", help="Team Name"),
+                    'P%': st.column_config.NumberColumn("P%", format="%.3f", help="Point Percentage"),
+                }
+                
+                styled_league = league_data.style.format({
+                    'P%': '{:.3f}',
+                    'W': '{:.0f}', 'L': '{:.0f}', 'OTL': '{:.0f}', 'PTS': '{:.0f}'
+                })
+                
+                # Render table using markdown text for the Icon column
+                st.markdown(styled_league.to_html(), unsafe_allow_html=True)
+
+
+        else:
+            st.info("Could not load current NHL standings.")
