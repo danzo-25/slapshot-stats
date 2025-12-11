@@ -37,7 +37,6 @@ def remove_player(player, side):
 # --- CSS ---
 st.markdown("""
 <style>
-    /* New CSS for the Tab 5 Player Grid */
     .league-grid-container {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -51,23 +50,6 @@ st.markdown("""
         background-color: #1e1e1e;
         min-height: 400px;
     }
-    .roster-player-item {
-        display: flex;
-        align-items: center;
-        margin-bottom: 5px;
-        padding: 5px;
-        background-color: #262730;
-        border-radius: 4px;
-        font-size: 0.9em;
-    }
-    .player-headshot {
-        width: 30px;
-        height: 30px;
-        border-radius: 50%;
-        margin-right: 10px;
-        object-fit: cover;
-    }
-
     .game-card { background-color: #262730; border: 1px solid #41444e; border-radius: 8px; padding: 5px; text-align: center; margin: 0 auto 5px auto; max-width: 100%; box-shadow: 1px 1px 3px rgba(0,0,0,0.2); }
     .team-row { display: flex; justify-content: center; align-items: center; gap: 5px; }
     .team-info { display: flex; flex-direction: column; align-items: center; }
@@ -76,9 +58,7 @@ st.markdown("""
     .vs-text { font-size: 1em; font-weight: bold; color: #888; padding-top: 5px; }
     .game-time { margin-top: 5px; font-weight: bold; color: #FF4B4B; font-size: 0.9em; border-top: 1px solid #41444e; padding-top: 2px; }
     .game-live { margin-top: 5px; font-weight: bold; color: #ff4b4b; font-size: 1.0em; border-top: 1px solid #41444e; padding-top: 2px; animation: pulse 2s infinite; }
-    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
-
-    /* NEWS STYLING */
+    
     .news-container { background-color: #1e1e1e; border-radius: 12px; padding: 15px; border: 1px solid #333; }
     .news-card { display: flex; background-color: #262730; border: 1px solid #3a3b42; margin-bottom: 12px; border-radius: 8px; overflow: hidden; transition: transform 0.2s; }
     .news-card:hover { transform: translateY(-2px); border-color: #555; }
@@ -88,11 +68,9 @@ st.markdown("""
     .news-title:hover { color: #4da6ff; }
     .news-desc { font-size: 0.85em; color: #aaa; margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
-    /* TRADE STYLES */
     .trade-win { background-color: rgba(76, 175, 80, 0.15); border: 2px solid #4caf50; padding: 15px; border-radius: 8px; text-align: center; }
     .trade-loss { background-color: rgba(244, 67, 54, 0.15); border: 2px solid #f44336; padding: 15px; border-radius: 8px; text-align: center; }
     .selected-player-card { background-color: #333; border: 1px solid #555; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
-    
     .link-btn { display: block; background-color: #262730; color: #ddd; text-align: center; padding: 8px; margin-bottom: 5px; text-decoration: none; border-radius: 4px; font-size: 0.9em; border: 1px solid #444; }
     .link-btn:hover { background-color: #444; color: white; border-color: #666; }
 </style>
@@ -109,11 +87,7 @@ else:
         st.header("⚙️ League Settings")
         st.caption("Enter your ESPN League ID (must be public)")
 
-        league_id = st.text_input(
-            "ESPN League ID",
-            key="league_id_input",
-            placeholder="e.g., 234472"
-        )
+        league_id = st.text_input("ESPN League ID", key="league_id_input", placeholder="e.g., 234472")
         
         with st.expander("Fantasy Scoring (FP)", expanded=False):
             st.caption("Customize these to match your league.")
@@ -136,23 +110,17 @@ else:
 
     if league_id:
         try:
-            # UNIFIED FETCH: Rosters + Standings + League Name
             roster_data, standings_df, league_name, status = fetch_espn_league_data(league_id, 2026)
             
             if status == 'SUCCESS':
                 st.session_state.league_name = league_name 
                 st.session_state.league_rosters = roster_data 
 
-                # Update Rosters
                 roster_players = [p['Name'] for team in roster_data.values() for p in team]
                 st.session_state.my_roster = [p for p in st.session_state.my_roster if p in roster_players]
 
-                # Create lookup for faster Team mapping
-                player_team_map = {p['Name']: p.get('NHLTeam', 'FA') for team in roster_data.values() for p in team}
+                df['Team'] = df['Player'].apply(lambda x: next((p['NHLTeam'] for team in roster_data.values() for p in team if p['Name'] == x), x) if x in roster_players else 'FA')
                 
-                df['Team'] = df['Player'].apply(lambda x: player_team_map.get(x, x) if x in roster_players else 'FA')
-                
-                # Update Standings
                 if not standings_df.empty:
                     st.session_state.espn_standings = standings_df
             
@@ -178,7 +146,7 @@ else:
     for s in ['G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'FP', 'W', 'Svs', 'SO']:
         if s in df.columns: df[f'ROS_{s}'] = calc_ros(s)
 
-    # --- TABS (NOW 6) ---
+    # --- TABS ---
     tab_label_5 = f"🏆 {st.session_state.league_name}"
     tab_home, tab_analytics, tab_tools, tab_fantasy, tab_league, tab_standings = st.tabs(["🏠 Home", "📊 Data & Analytics", "🛠️ Fantasy Tools", "⚔️ My Fantasy Team", tab_label_5, "📊 League Standings"])
 
@@ -207,13 +175,10 @@ else:
                             </div>""", unsafe_allow_html=True)
         st.divider()
         col_sos, col_news = st.columns([3, 2])
-        
-        # --- SOS TABLE (LOGOS) ---
         with col_sos:
             st.header("💪 Strength of Schedule")
             with st.spinner("Calculating..."):
                 sos_matrix, standings = get_weekly_schedule_matrix()
-            
             if not sos_matrix.empty and standings:
                 def get_logo(abbr): return f"https://assets.nhle.com/logos/nhl/svg/{abbr}_light.svg"
                 sos_display = sos_matrix.copy()
@@ -249,7 +214,6 @@ else:
                 column_config = {"Team": st.column_config.ImageColumn("Team", width="small")}
                 day_cols = [c for c in sos_display.columns if c != 'Team']
                 for col in day_cols: column_config[col] = st.column_config.ImageColumn(col, width="small")
-
                 st.dataframe(styled_sos, use_container_width=True, height=500, column_config=column_config, hide_index=True)
             else: st.info("SOS data unavailable.")
 
@@ -262,10 +226,9 @@ else:
                         img_html = f'<img src="{article["image"]}" class="news-img">' if article['image'] else ''
                         st.markdown(f"""<div class="news-card">{img_html}<div class="news-content"><a href="{article['link']}" target="_blank" class="news-title">{article['headline']}</a><p class="news-desc">{article['description']}</p></div></div>""", unsafe_allow_html=True)
                 else: st.info("No news.")
-
             st.markdown("#### More Trusted Sources")
             st.markdown("""<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;"><a href="https://www.tsn.ca/nhl" target="_blank" class="link-btn">TSN Hockey</a><a href="https://www.sportsnet.ca/nhl/" target="_blank" class="link-btn">Sportsnet</a><a href="https://www.dailyfaceoff.com/" target="_blank" class="link-btn">Daily Faceoff</a><a href="https://theathletic.com/nhl/" target="_blank" class="link-btn">The Athletic</a></div>""", unsafe_allow_html=True)
-
+        
         st.divider()
         st.header("🔥 Hot This Week (Last 7 Days)")
         with st.spinner("Loading weekly trends..."):
@@ -308,10 +271,9 @@ else:
             pos = sorted(df['Pos'].unique())
             sel_pos = c2.multiselect("Position", pos, default=pos)
         
-        # REMOVED TIME FILTER FROM LEAGUE SUMMARY DUE TO PERFORMANCE CRASH
         st.caption("Time filtering is only available on 'My Roster' (Tab 4) due to API performance constraints.")
 
-        # --- DATA FILTERING (Static Filters Only) ---
+        # --- DATA FILTERING ---
         filt_df = df.copy()
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
@@ -369,12 +331,10 @@ else:
         else:
             st.info("No player data available for the current filters or time period.")
 
-
     # ================= TAB 3: FANTASY TOOLS =================
     with tab_tools:
         st.header("⚖️ Trade Analyzer")
         
-        # --- LEAGUE STANDINGS ---
         if 'espn_standings' in st.session_state and not st.session_state.espn_standings.empty:
             st.subheader("🏆 League Standings")
             st.dataframe(
@@ -588,7 +548,7 @@ else:
                 "SOG": st.column_config.NumberColumn("SOG", format="%.0f"),
                 "W": st.column_config.NumberColumn("W", format="%.0f"),
                 "GA": st.column_config.NumberColumn("GA", format="%.0f"),
-                "TOI": st.column_config.TextColumn("TOI", help="Time On Ice per Game (string format)"),
+                "TOI": st.column_config.TextColumn("TOI", help="Time On Ice per Game"),
                 "SHP": st.column_config.NumberColumn("SHP", format="%.0f", help="Shorthanded Points"),
                 "PPP": st.column_config.NumberColumn("PPP", format="%.0f", help="Power Play Points"),
             }
@@ -652,30 +612,29 @@ else:
         if st.session_state.get('league_rosters'):
             roster_dict = st.session_state.league_rosters
             team_names = list(roster_dict.keys())
-            html_grid = ['<div class="league-grid-container">']
-
-            for team_name in team_names:
+            
+            # --- DISPLAY GRID (TEXT ONLY) ---
+            num_teams = len(team_names)
+            cols = st.columns(4) # 4 columns grid
+            
+            for i, team_name in enumerate(team_names):
                 roster = roster_dict[team_name]
-                team_html = [f'<div class="team-roster-box"><div class="team-roster-header">{team_name}</div>']
                 
-                for player_entry in roster:
-                    # Logic is handled in data_loader
-                    p_name = player_entry.get('Name', 'Unknown')
-                    img_url = player_entry.get('Headshot', 'https://assets.nhle.com/mugs/nhl/default.png')
-                    
-                    team_html.append(f"""
-                        <div class="roster-player-item">
-                            <img src="{img_url}" class="player-headshot" onerror="this.onerror=null; this.src='https://assets.nhle.com/mugs/nhl/default.png';">
-                            <span>{p_name}</span>
-                        </div>
-                    """)
+                # Create simple dataframe for display
+                # roster is list of dicts: {'Name': '...', 'NHLTeam': '...'}
+                team_df = pd.DataFrame(roster)
                 
-                team_html.append('</div>')
-                html_grid.extend(team_html)
-            
-            html_grid.append('</div>')
-            st.markdown('\n'.join(html_grid), unsafe_allow_html=True)
-            
+                with cols[i % 4]:
+                    st.subheader(team_name)
+                    st.dataframe(
+                        team_df,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Name": st.column_config.TextColumn("Player"),
+                            "NHLTeam": st.column_config.TextColumn("Team")
+                        }
+                    )
         else:
             st.info("Enter a valid League ID in the sidebar to see full league rosters.")
 
@@ -703,6 +662,7 @@ else:
                 for group_name, group_data in standings_data.groupby('Group'):
                     st.markdown(f"#### {group_name}")
                     group_data = group_data[display_cols].reset_index(drop=True)
+                    # Use .hide(axis='index') instead of .apply_index
                     styled_group = group_data.style.format({
                         'P%': '{:.3f}', 'W': '{:.0f}', 'L': '{:.0f}', 'OTL': '{:.0f}', 'PTS': '{:.0f}'
                     }).hide(axis="index")
