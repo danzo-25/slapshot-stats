@@ -86,6 +86,7 @@ def load_nhl_data():
     elif df_goalies.empty: df_combined = df_sum
     else: df_combined = pd.concat([df_sum, df_goalies], ignore_index=True)
 
+    # Clean Data
     if 'Team' in df_combined.columns:
         df_combined['Team'] = df_combined['Team'].apply(lambda x: x.split(',')[-1].strip() if isinstance(x, str) else 'N/A')
     else: df_combined['Team'] = 'N/A'
@@ -104,7 +105,8 @@ def load_nhl_data():
     
     return df_combined[final_cols]
 
-@st.cache_data(ttl=3600)
+# --- MODIFIED: LOWER TTL FOR GAME LOGS TO FIX STALE DATA ---
+@st.cache_data(ttl=600) # Changed from 3600 to 600 (10 mins)
 def get_player_game_log(player_id):
     url = f"https://api-web.nhle.com/v1/player/{player_id}/game-log/20252026/2"
     try:
@@ -307,7 +309,7 @@ def fetch_espn_roster_data(league_id, season_year):
     except Exception as e:
         return {}, 'FAILED_FETCH'
 
-# --- NEW: FETCH LEAGUE STANDINGS ---
+# --- FETCH LEAGUE STANDINGS ---
 @st.cache_data(ttl=60)
 def fetch_espn_standings(league_id, season_year):
     """
@@ -319,7 +321,6 @@ def fetch_espn_standings(league_id, season_year):
         'Accept': 'application/json',
     }
     
-    # We specifically need 'mTeam' to get the record
     params = {'view': 'mTeam'}
 
     def try_fetch(year):
@@ -331,7 +332,6 @@ def fetch_espn_standings(league_id, season_year):
         except:
             return {}, 'ERROR'
 
-    # Try 2026, fallback to 2025
     data, status = try_fetch(season_year)
     if status == 'ERROR':
         data, status = try_fetch(season_year - 1)
@@ -342,7 +342,6 @@ def fetch_espn_standings(league_id, season_year):
     try:
         standings_list = []
         for team in data.get('teams', []):
-            # Team Name
             abbrev = team.get('abbrev')
             location = team.get('location', '')
             nickname = team.get('nickname', '')
@@ -354,14 +353,10 @@ def fetch_espn_standings(league_id, season_year):
             else:
                 full_name = f"Team {team.get('id')}"
 
-            # Record
             record = team.get('record', {}).get('overall', {})
             wins = record.get('wins', 0)
             losses = record.get('losses', 0)
             ties = record.get('ties', 0)
-            points = record.get('points', 0) # Points for
-            
-            # Rank
             rank = team.get('playoffSeed', team.get('rankCalculatedFinal', 0))
 
             standings_list.append({
