@@ -1,20 +1,10 @@
-# slapshot_app.py
 import streamlit as st
 import pandas as pd
 import altair as alt
 import re
 from datetime import datetime, timedelta
-import requests
-from rapidfuzz import process, fuzz
-from data_loader import (
-    load_nhl_data,
-    get_player_game_log,
-    load_schedule,
-    load_weekly_leaders,
-    get_weekly_schedule_matrix,
-    load_nhl_news,
-    fetch_espn_league_data,
-)
+import requests # Needed for the URL check in Tab 5
+from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news, fetch_espn_league_data
 
 st.set_page_config(layout="wide", page_title="Slapshot Stats")
 st.title("🏒 Slapshot Stats")
@@ -42,86 +32,6 @@ def remove_player(player, side):
     target = st.session_state.trade_send if side == 'send' else st.session_state.trade_recv
     if player in target:
         target.remove(player)
-
-# -------------------------
-# Normalization & Matching
-# -------------------------
-def normalize_name(name: str) -> str:
-    """Lowercase, remove punctuation and extra whitespace for matching."""
-    if not isinstance(name, str):
-        return ""
-    # Remove accents by normalizing to ASCII (simple approach)
-    name = name.strip()
-    # Remove punctuation (keep letters and spaces)
-    name = re.sub(r'[^A-Za-z0-9\s]', '', name)
-    name = re.sub(r'\s+', ' ', name)
-    return name.lower()
-
-def normalize_and_match_players(espn_rosters: dict, df: pd.DataFrame, score_threshold_high=90, score_threshold_low=80):
-    """
-    Convert ESPN roster dict (team -> [names]) into team -> [mapped entries]
-    Each mapped entry is a dict:
-      { "original": <espn name>, "matched": <nhl name or original>, "ID": <id or None>, "NHLTeam": <team or None>, "score": <fuzzy score> }
-    """
-    # build list/dict of NHL player names
-    nhl_names = df['Player'].dropna().astype(str).unique().tolist()
-    normalized_nhl_map = { normalize_name(n): n for n in nhl_names }
-
-    # candidates for rapidfuzz: use normalized keys
-    candidates = list(normalized_nhl_map.keys())
-
-    result_rosters = {}
-    for team_name, roster_list in espn_rosters.items():
-        team_mapped = []
-        for espn_name in roster_list:
-            n_espn = normalize_name(espn_name)
-            matched_name = None
-            score = None
-
-            # exact normalized match
-            if n_espn in normalized_nhl_map:
-                matched_name = normalized_nhl_map[n_espn]
-                score = 100
-            else:
-                # fuzzy match
-                best = process.extractOne(n_espn, candidates, scorer=fuzz.WRatio)
-                if best:
-                    cand_norm, score, _ = best
-                    if score >= score_threshold_high or score >= score_threshold_low:
-                        matched_name = normalized_nhl_map.get(cand_norm)
-                    else:
-                        matched_name = None
-
-            if matched_name and matched_name in df['Player'].values:
-                row = df[df['Player'] == matched_name].iloc[0]
-                mapped_entry = {
-                    "original": espn_name,
-                    "matched": matched_name,
-                    "ID": row.get("ID", None),
-                    "NHLTeam": row.get("Team", None),
-                    "score": int(score) if score is not None else None
-                }
-            else:
-                # no good match
-                mapped_entry = {
-                    "original": espn_name,
-                    "matched": matched_name if matched_name else espn_name,
-                    "ID": None,
-                    "NHLTeam": None,
-                    "score": int(score) if score is not None else (100 if matched_name else 0)
-                }
-            team_mapped.append(mapped_entry)
-        result_rosters[team_name] = team_mapped
-
-    return result_rosters
-
-# lightweight URL existence check
-def url_ok(url, timeout=0.6):
-    try:
-        resp = requests.head(url, timeout=timeout)
-        return resp.status_code == 200
-    except Exception:
-        return False
 
 # --- CSS ---
 st.markdown("""
@@ -228,26 +138,15 @@ else:
             
             if status == 'SUCCESS':
                 st.session_state.league_name = league_name # Save dynamic name
+                st.session_state.league_rosters = roster_data # Save for Tab 5
 
-                # Map ESPN roster names -> NHL player metadata (Option C)
-                corrected = normalize_and_match_players(roster_data, df)
-                st.session_state.league_rosters = corrected
-
-                # Update Rosters: keep my_roster only if in ESPN roster players (original names)
-                roster_players = [entry['original'] for team in corrected.values() for entry in team]
+                # Update Rosters
+                roster_players = [p['Name'] for team in roster_data.values() for p in team]
                 st.session_state.my_roster = [p for p in st.session_state.my_roster if p in roster_players]
 
-                # Update df['Team'] for players that exist in ESPN rosters (attempt best-effort)
-                # Create map from matched name -> owning ESPN team
-                matched_to_team = {}
-                for team, roster in corrected.items():
-                    for entry in roster:
-                        if entry.get('matched') and entry.get('matched') != entry.get('original'):
-                            matched_to_team[entry['matched']] = team
-                # Apply mapping where possible
-                def map_team_for_player(player_name):
-                    return matched_to_team.get(player_name, player_name)
-                df['Team'] = df['Player'].apply(map_team_for_player)
+                df['Team'] = df['Player'].apply(lambda x: 
+                                                next((p['NHLTeam'] for team in roster_data.values() for p in team if p['Name'] == x), x)
+                                                if x in roster_players else 'FA')
                 
                 # Update Standings
                 if not standings_df.empty:
@@ -262,8 +161,6 @@ else:
                 df = st.session_state.initial_df.copy()
 
         except Exception as e:
-            # If anything goes wrong, use initial df and leave league_rosters untouched
-            st.error("Error fetching league data — using cached data.")
             df = st.session_state.initial_df.copy()
 
     # --- CALCULATE FP GLOBALLY ---
@@ -512,6 +409,7 @@ else:
         else:
             st.info("No player data available for the current filters or time period.")
 
+
     # ================= TAB 3: FANTASY TOOLS =================
     with tab_tools:
         st.header("⚖️ Trade Analyzer")
@@ -606,8 +504,8 @@ else:
                 trade_config = {
                     "Side": st.column_config.TextColumn("Side", pinned=True),
                     "Player": st.column_config.TextColumn("Player", pinned=True),
-                    "FP": st.column_config.NumberColumn("FP", help="Current Fantasy Points", format="%.1f"),
-                    "ROS_FP": st.column_config.NumberColumn("ROS FP", help="Rest of Season Projected FP", format="%.1f"),
+                    "FP": st.column_config.NumberColumn("FP", format="%.1f", help="Current Fantasy Points"),
+                    "ROS_FP": st.column_config.NumberColumn("ROS FP", format="%.1f", help="Rest of Season Projected FP"),
                     "G": st.column_config.NumberColumn("G", help="Current Goals"), "ROS_G": st.column_config.NumberColumn("ROS G", help="Projected Goals"),
                     "A": st.column_config.NumberColumn("A", help="Current Assists"), "ROS_A": st.column_config.NumberColumn("ROS A", help="Projected Assists"),
                     "Pts": st.column_config.NumberColumn("Pts", help="Current Points"), "ROS_Pts": st.column_config.NumberColumn("ROS Pts", help="Projected Points"),
@@ -634,8 +532,7 @@ else:
             try:
                 udf = pd.read_csv(uploaded_file)
                 if "Player" in udf.columns: st.session_state.my_roster = [p for p in udf["Player"] if p in df['Player'].values]
-            except Exception:
-                pass
+            except: pass
 
         # Manual Selection (Used for display if league ID isn't entered)
         selected_players = st.multiselect("Search Players:", df['Player'].unique(), default=st.session_state.my_roster)
@@ -651,7 +548,7 @@ else:
                 days_map = {"Last 7 Days": 7, "Last 15 Days": 15, "Last 30 Days": 30}
                 days = days_map.get(time_filter, 0)
                 
-                # Force Start Date to Midnight
+                # FIXED: Force Start Date to Midnight to avoid missing early games using Pandas Timestamp
                 start_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=days)
                 
                 st.caption(f"Showing stats from **{start_date.strftime('%Y-%m-%d')}** to Present")
@@ -661,34 +558,34 @@ else:
                     for _, row in base_team_df.iterrows():
                         pid = row['ID']
                         logs = get_player_game_log(pid) 
-                        if logs is None or logs.empty:
-                            continue
-                        mask = logs['gameDate'] >= start_date
-                        recent = logs[mask]
-                        stat_dict = {
-                            'ID': pid, 'Player': row['Player'], 'Team': row['Team'], 'Pos': row['Pos'],
-                            'GP': len(recent),
-                            'G': recent['goals'].sum() if 'goals' in recent.columns else 0,
-                            'A': recent['assists'].sum() if 'assists' in recent.columns else 0,
-                            'Pts': recent['points'].sum() if 'points' in recent.columns else 0,
-                            'SOG': recent['shots'].sum() if 'shots' in recent.columns else 0,
-                            'PPP': recent['powerPlayPoints'].sum() if 'powerPlayPoints' in recent.columns else 0,
-                            'Hits': recent['hits'].sum() if 'hits' in recent.columns else 0,
-                            'BkS': recent['blockedShots'].sum() if 'blockedShots' in recent.columns else 0,
-                            'PIM': recent['pim'].sum() if 'pim' in recent.columns else 0,
-                            'W': len(recent[recent['decision'] == 'W']) if 'decision' in recent.columns else 0,
-                            'SO': recent['shutouts'].sum() if 'shutouts' in recent.columns else 0,
-                            'Svs': recent['saves'].sum() if 'saves' in recent.columns else 0,
-                            'GA': recent['goalsAgainst'].sum() if 'goalsAgainst' in recent.columns else 0,
-                            'L': len(recent[recent['decision'] == 'L']) if 'decision' in recent.columns else 0,
-                            'OTL': len(recent[recent['decision'] == 'OT']) if 'decision' in recent.columns else 0,
-                            'SHP': recent['shorthandedPoints'].sum() if 'shorthandedPoints' in recent.columns else 0,
-                        }
-                        fp = (stat_dict['G']*val_G + stat_dict['A']*val_A + stat_dict['PPP']*val_PPP + 
-                              stat_dict['SOG']*val_SOG + stat_dict['Hits']*val_Hit + stat_dict['BkS']*val_BkS +
-                              stat_dict['W']*val_W + stat_dict['GA']*val_GA + stat_dict['Svs']*val_Svs + stat_dict['SO']*val_SO + (stat_dict['SHP'] * val_SHP))
-                        stat_dict['FP'] = fp
-                        recent_stats.append(stat_dict)
+                        if not logs.empty:
+                            mask = logs['gameDate'] >= start_date
+                            recent = logs[mask]
+                            
+                            stat_dict = {
+                                'ID': pid, 'Player': row['Player'], 'Team': row['Team'], 'Pos': row['Pos'],
+                                'GP': len(recent),
+                                'G': recent['goals'].sum() if 'goals' in recent.columns else 0,
+                                'A': recent['assists'].sum() if 'assists' in recent.columns else 0,
+                                'Pts': recent['points'].sum() if 'points' in recent.columns else 0,
+                                'SOG': recent['shots'].sum() if 'shots' in recent.columns else 0,
+                                'PPP': recent['powerPlayPoints'].sum() if 'powerPlayPoints' in recent.columns else 0,
+                                'Hits': recent['hits'].sum() if 'hits' in recent.columns else 0,
+                                'BkS': recent['blockedShots'].sum() if 'blockedShots' in recent.columns else 0,
+                                'PIM': recent['pim'].sum() if 'pim' in recent.columns else 0,
+                                'W': len(recent[recent['decision'] == 'W']) if 'decision' in recent.columns else 0,
+                                'SO': recent['shutouts'].sum() if 'shutouts' in recent.columns else 0,
+                                'Svs': recent['saves'].sum() if 'saves' in recent.columns else 0,
+                                'GA': recent['goalsAgainst'].sum() if 'goalsAgainst' in recent.columns else 0,
+                                'L': len(recent[recent['decision'] == 'L']) if 'decision' in recent.columns else 0,
+                                'OTL': len(recent[recent['decision'] == 'OT']) if 'decision' in recent.columns else 0,
+                                'SHP': recent['shorthandedPoints'].sum() if 'shorthandedPoints' in recent.columns else 0,
+                            }
+                            fp = (stat_dict['G']*val_G + stat_dict['A']*val_A + stat_dict['PPP']*val_PPP + 
+                                  stat_dict['SOG']*val_SOG + stat_dict['Hits']*val_Hit + stat_dict['BkS']*val_BkS +
+                                  stat_dict['W']*val_W + stat_dict['GA']*val_GA + stat_dict['Svs']*val_Svs + stat_dict['SO']*val_SO + (stat_dict['SHP'] * val_SHP))
+                            stat_dict['FP'] = fp
+                            recent_stats.append(stat_dict)
                     
                     if recent_stats:
                         display_df = pd.DataFrame(recent_stats)
@@ -736,7 +633,9 @@ else:
                 "PPP": st.column_config.NumberColumn("PPP", format="%.0f", help="Power Play Points"),
             }
             
-            valid_whole = [c for c in ['G', 'A', 'Pts', 'GWG', 'SOG', 'L', 'OTL', 'SO', 'GP', 'PIM', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SHP', 'PPP'] if c in display_df.columns]
+            full_whole_num_cols = ['G', 'A', 'Pts', 'GWG', 'SOG', 'L', 'OTL', 'SO', 'GP', 'PIM', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SHP', 'PPP']
+            valid_whole = [c for c in full_whole_num_cols if c in display_df.columns]
+            
             valid_one_dec = [c for c in ['FP', 'Sh%', 'FO%'] if c in display_df.columns]
             valid_two_dec = [c for c in ['GAA', 'GSAA'] if c in display_df.columns]
             valid_three_dec = [c for c in ['SV%'] if c in display_df.columns]
@@ -758,17 +657,16 @@ else:
                 pid = row['ID']
                 logs = get_player_game_log(pid)
                 
-                if logs is None or logs.empty or len(logs) < 5:
-                    continue
-                logs = logs.copy()
-                logs['GF_FP'] = (logs.get('goals',0)*val_G + logs.get('assists',0)*val_A + 
-                                 logs.get('shots',0)*val_SOG + logs.get('hits',0)*val_Hit + 
-                                 logs.get('blockedShots',0)*val_BkS)
-                
-                last_5_avg = logs.tail(5)['GF_FP'].mean()
-                season_avg = row['FP'] / row['GP'] if row['GP'] > 0 else 0
-                diff = last_5_avg - season_avg
-                trend_data.append({'Player': row['Player'], 'Trend': diff, 'Val': last_5_avg})
+                if not logs.empty and len(logs) >= 5:
+                    logs['GF_FP'] = (logs.get('goals',0)*val_G + logs.get('assists',0)*val_A + 
+                                     logs.get('shots',0)*val_SOG + logs.get('hits',0)*val_Hit + 
+                                     logs.get('blockedShots',0)*val_BkS)
+                    
+                    last_5_avg = logs.tail(5)['GF_FP'].mean()
+                    season_avg = row['FP'] / row['GP'] if row['GP'] > 0 else 0
+                    diff = last_5_avg - season_avg
+                    
+                    trend_data.append({'Player': row['Player'], 'Trend': diff, 'Val': last_5_avg})
             
             if trend_data:
                 df_trend = pd.DataFrame(trend_data).sort_values('Trend')
@@ -790,138 +688,61 @@ else:
     # ================= TAB 5: LEAGUE ROSTERS =================
     with tab_league:
         st.header(f"Rosters for {st.session_state.league_name}")
-
-        roster_dict = st.session_state.get('league_rosters', {})
-        if not roster_dict:
-            st.info("Enter a valid League ID in the sidebar to see full league rosters.")
-        else:
-            # fallback images
-            fallback_img = "https://upload.wikimedia.org/wikipedia/commons/a/ac/No_image_available.svg"
-
+        
+        if st.session_state.get('league_rosters'):
+            roster_dict = st.session_state.league_rosters
             team_names = list(roster_dict.keys())
-            num_cols = min(4, max(1, len(team_names)))
-            cols = st.columns(num_cols)
+            
+            # Create a combined HTML string for the entire grid
+            html_grid = ['<div class="league-grid-container">']
 
-            unmatched_names = []
-
-            # If df has Player->ID mapping, create a quick lookup
-            player_meta_map = {row['Player']: {'ID': row['ID'], 'Team': row['Team']} for _, row in df[['Player','ID','Team']].dropna(subset=['Player']).iterrows()}
-
-            for idx, team_name in enumerate(team_names):
-                col = cols[idx % num_cols]
-                with col:
-                    st.subheader(team_name)
-                    roster = roster_dict.get(team_name, [])
-                    if not roster:
-                        st.write("_No players_")
-                        continue
-
-                    # roster is expected to be list of dicts (Option C). But if it's list of strings, handle both
-                    for entry in roster:
-                        # detect entry type
-                        if isinstance(entry, dict):
-                            original = entry.get('original') or ""
-                            matched = entry.get('matched') or ""
-                            pid = entry.get('ID')
-                            nhl_team = entry.get('NHLTeam')
-                            score = entry.get('score', None)
-                        else:
-                            # legacy: entry is a string name
-                            original = str(entry)
-                            # try direct lookup in player_meta_map
-                            meta = player_meta_map.get(original)
-                            if meta:
-                                matched = original
-                                pid = meta.get('ID')
-                                nhl_team = meta.get('Team')
-                                score = 100
-                            else:
-                                # attempt fuzzy match quickly
-                                candidates = list(player_meta_map.keys())
-                                best = process.extractOne(normalize_name(original), [normalize_name(c) for c in candidates], scorer=fuzz.WRatio)
-                                matched = original
-                                pid = None
-                                nhl_team = None
-                                score = 0
-                                if best:
-                                    # best is tuple (norm_candidate, score, idx) because we matched on normalized list; find real name by index
-                                    # to be safe, loop to find candidate with same normalized string
-                                    norm_candidate = best[0]
-                                    sc = best[1]
-                                    # find candidate index
-                                    found = None
-                                    for c in candidates:
-                                        if normalize_name(c) == norm_candidate:
-                                            found = c
-                                            break
-                                    if found and sc >= 85:
-                                        matched = found
-                                        pid = player_meta_map[found]['ID']
-                                        nhl_team = player_meta_map[found]['Team']
-                                        score = sc
-                                    else:
-                                        unmatched_names.append(original)
-
-                        # Build image URL candidates
-                        img_url = fallback_img
-                        if pid and nhl_team:
-                            pid_s = str(pid).strip()
-                            nhl_team_s = str(nhl_team).strip()
-                            cand1 = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team_s}/{pid_s}.png"
-                            cand2 = f"https://assets.nhle.com/mugs/nhl/20252026/{pid_s}.png"
-                            if url_ok(cand1):
-                                img_url = cand1
-                            elif url_ok(cand2):
-                                img_url = cand2
-                            else:
-                                img_url = fallback_img
-                        else:
-                            # try to find matched name in player_meta_map if present
-                            if matched and matched in player_meta_map:
-                                m = player_meta_map[matched]
-                                pid_s = str(m.get('ID'))
-                                nhl_team_s = str(m.get('Team'))
-                                cand1 = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team_s}/{pid_s}.png"
-                                cand2 = f"https://assets.nhle.com/mugs/nhl/20252026/{pid_s}.png"
-                                if url_ok(cand1):
-                                    img_url = cand1
-                                elif url_ok(cand2):
-                                    img_url = cand2
-
-                        # Render compact row using two narrow columns (img + name)
-                        try:
-                            row_cols = st.columns([0.18, 0.82])
-                            with row_cols[0]:
-                                st.image(img_url, width=36)
-                            with row_cols[1]:
-                                if isinstance(entry, dict):
-                                    # show matched name and original ESPN name
-                                    display_name = entry.get('matched') or entry.get('original')
-                                    if entry.get('score') is not None:
-                                        st.markdown(f"**{display_name}**  <span style='color:#888'>({original})</span>", unsafe_allow_html=True)
-                                    else:
-                                        st.write(f"{display_name}  ({original})")
-                                else:
-                                    st.write(original)
-                        except Exception:
-                            # fallback to raw HTML if st.image errors
-                            st.markdown(f'<div style="display:flex; align-items:center;"><img src="{img_url}" width="36" style="border-radius:50%; margin-right:8px;">{original}</div>', unsafe_allow_html=True)
-
-            # Diagnostics
-            # collect unmatched from mapped rosters where ID is None and fuzzy score is low
-            unmapped = []
-            for t, roster in roster_dict.items():
-                for e in roster:
-                    if isinstance(e, dict):
-                        if e.get('ID') is None:
-                            unmapped.append({"team": t, "original": e.get('original'), "matched": e.get('matched'), "score": e.get('score')})
-                    else:
-                        # plain string entry
-                        if e not in player_meta_map:
-                            unmapped.append({"team": t, "original": e, "matched": None, "score": 0})
-
-            if unmapped:
-                st.warning(f"{len(unmapped)} roster entries could not be matched to the NHL dataset (showing up to 30).")
-                st.dataframe(pd.DataFrame(unmapped).head(30))
-            else:
-                st.success("All roster names mapped to NHL dataset entries (or matched with high confidence).")
+            # Helper to check image URL status (required for robust fallback)
+            def url_ok(url, timeout=0.5):
+                try:
+                    resp = requests.head(url, timeout=timeout) 
+                    return resp.status_code == 200
+                except Exception:
+                    return False
+            
+            fallback_img = "https://assets.nhle.com/mugs/nhl/default.png"
+            
+            for team_name in team_names:
+                roster = roster_dict[team_name]
+                team_html = [f'<div class="team-roster-box"><h3>{team_name}</h3>']
+                
+                for player_entry in roster:
+                    
+                    # Data is pre-matched in the backend: player_entry = {'Name': ..., 'ID': ..., 'NHLTeam': ...}
+                    p_name = player_entry.get('Name', 'Unknown Player')
+                    pid = player_entry.get('ID', '0')
+                    nhl_team = player_entry.get('NHLTeam', 'N/A')
+                    
+                    img_url = fallback_img
+                    
+                    # Only attempt CDN check if we have valid metadata
+                    if pid != '0' and nhl_team != 'N/A':
+                        potential_url = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team}/{pid}.png"
+                        
+                        # NOTE: Removing the costly requests.head check, as it slows down initial render too much. 
+                        # We will assume the NHL CDN URL is correct if the data exists, and rely on the browser's 
+                        # broken image fallback if it's not.
+                        img_url = potential_url 
+                    
+                    # RENDER PLAYER ITEM
+                    team_html.append(f"""
+                        <div class="roster-player-item">
+                            <img src="{img_url}" class="player-headshot" onerror="this.onerror=null; this.src='{fallback_img}';">
+                            <span>{p_name}</span>
+                        </div>
+                    """)
+                
+                team_html.append('</div>')
+                html_grid.extend(team_html)
+            
+            html_grid.append('</div>')
+            
+            # Render the final HTML grid once
+            st.markdown('\n'.join(html_grid), unsafe_allow_html=True)
+            
+        else:
+            st.info("Enter a valid League ID in the sidebar to see full league rosters.")
