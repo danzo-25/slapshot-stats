@@ -3,7 +3,7 @@ import pandas as pd
 import altair as alt
 import re
 from datetime import datetime, timedelta
-from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news, fetch_espn_roster_data, fetch_espn_standings
+from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news, fetch_espn_league_data
 
 st.set_page_config(layout="wide", page_title="Slapshot Stats")
 st.title("🏒 Slapshot Stats")
@@ -101,28 +101,28 @@ else:
 
     if league_id:
         try:
-            # 1. Fetch Roster
-            roster_data, status = fetch_espn_roster_data(league_id, 2026)
+            # UNIFIED FETCH: Rosters + Standings
+            roster_data, standings_df, status = fetch_espn_league_data(league_id, 2026)
             
             if status == 'SUCCESS':
+                # Update Rosters
                 roster_players = [p for team in roster_data.values() for p in team]
                 st.session_state.my_roster = [p for p in st.session_state.my_roster if p in roster_players]
 
                 df['Team'] = df['Player'].apply(lambda x: 
                                                 next((team_abbr for team_abbr, players in roster_data.items() if x in players), x)
                                                 if x in roster_players else 'FA')
-            
-            # 2. Fetch Standings
-            standings_df = fetch_espn_standings(league_id, 2026)
-            if not standings_df.empty:
-                st.session_state.espn_standings = standings_df
+                
+                # Update Standings
+                if not standings_df.empty:
+                    st.session_state.espn_standings = standings_df
             
             elif status == 'PRIVATE':
-                st.sidebar.error("Error: League is Private or Invalid ID. Cannot fetch rosters.")
+                st.sidebar.error("Error: League is Private or Invalid ID.")
                 df = st.session_state.initial_df.copy()
 
             elif status == 'FAILED_FETCH':
-                st.sidebar.error("Error fetching ESPN data. Check ID or season.")
+                st.sidebar.error("Error fetching ESPN data.")
                 df = st.session_state.initial_df.copy()
 
         except Exception as e:
@@ -259,7 +259,6 @@ else:
         st.divider()
         st.subheader("League Summary")
         
-        # --- NEW: TIME FILTER FOR LEAGUE SUMMARY ---
         col_filters, col_time = st.columns([3, 1])
         with col_filters.expander("Filter Options"):
             c1, c2 = st.columns(2)
@@ -275,16 +274,11 @@ else:
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
 
-        # --- TIME FILTER LOGIC (FIXED) ---
+        # --- TIME FILTER LOGIC ---
         if time_filter_league != "Season (2025/26)":
             days_map = {"Last 7 Days": 7, "Last 15 Days": 15, "Last 30 Days": 30}
             days = days_map.get(time_filter_league, 0)
-            
-            # Use Pandas Timestamp for robust date math (fixes timezone/midnight issues)
             start_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=days)
-            
-            # Display active filter range for user verification
-            st.caption(f"Showing stats from **{start_date.strftime('%Y-%m-%d')}** to Present")
             
             with st.spinner(f"Aggregating league activity for last {days} days..."):
                 recent_stats = []
@@ -292,7 +286,6 @@ else:
                     logs = get_player_game_log(row['ID'])
                     if not logs.empty:
                         recent = logs[logs['gameDate'] >= start_date]
-                        
                         if not recent.empty:
                             stat_dict = {
                                 'ID': row['ID'], 'Player': row['Player'], 'Team': row['Team'], 'Pos': row['Pos'],
@@ -317,6 +310,7 @@ else:
 
                 if recent_stats:
                     recent_df = pd.DataFrame(recent_stats)
+                    # Merge only missing columns, exclude 'ID' from list
                     base_cols = ['Sh%', 'FO%', 'GAA', 'SV%', 'GSAA', 'TOI']
                     existing_base_cols = [c for c in base_cols if c in df.columns]
                     if existing_base_cols:
@@ -573,11 +567,9 @@ else:
             c4.metric("Goalie Wins", int(display_df['W'].sum()) if 'W' in display_df.columns else 0)
             
             # --- RENDER TABLE ---
-            # Define all possible columns for the table (excluding ID and PosType)
             all_possible_cols = ['Player', 'Team', 'Pos', 'FP', 'GP', 'G', 'A', 'Pts', 'GWG', 'SOG', 'Sh%', 'FO%', 'L', 'OTL', 'GAA', 'SV%', 'GSAA', 'SO', 'PIM', 'Hits', 'BkS', 'W', 'Svs', 'GA', 'TOI', 'SHP', 'PPP']
             final_cols = [c for c in all_possible_cols if c in display_df.columns and c != 'ID'] 
             
-            # 1. COLUMN CONFIG (for Tooltips & Pinning)
             roster_config = {
                 "Player": st.column_config.TextColumn("Player", pinned=True),
                 "FP": st.column_config.NumberColumn("FP", format="%.1f", help="Fantasy Points in selected period"),
@@ -605,13 +597,9 @@ else:
                 "PPP": st.column_config.NumberColumn("PPP", format="%.0f", help="Power Play Points"),
             }
             
-            # 2. STYLING (for Decimal Control - ONLY apply to existing columns)
             full_whole_num_cols = ['G', 'A', 'Pts', 'GWG', 'SOG', 'L', 'OTL', 'SO', 'GP', 'PIM', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SHP', 'PPP']
-            
-            # Filter the list to only include columns currently in the DataFrame (display_df)
             valid_whole = [c for c in full_whole_num_cols if c in display_df.columns]
             
-            # Define percentage/decimal columns
             valid_one_dec = [c for c in ['FP', 'Sh%', 'FO%'] if c in display_df.columns]
             valid_two_dec = [c for c in ['GAA', 'GSAA'] if c in display_df.columns]
             valid_three_dec = [c for c in ['SV%'] if c in display_df.columns]
