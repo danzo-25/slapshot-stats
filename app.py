@@ -13,6 +13,8 @@ if 'my_roster' not in st.session_state: st.session_state.my_roster = []
 if "trade_send" not in st.session_state: st.session_state.trade_send = []
 if "trade_recv" not in st.session_state: st.session_state.trade_recv = []
 if "espn_standings" not in st.session_state: st.session_state.espn_standings = pd.DataFrame()
+if "league_rosters" not in st.session_state: st.session_state.league_rosters = {}
+if "league_name" not in st.session_state: st.session_state.league_name = "League Rosters"
 
 # --- CALLBACKS ---
 def add_player_from_select(side):
@@ -101,10 +103,13 @@ else:
 
     if league_id:
         try:
-            # UNIFIED FETCH: Rosters + Standings
-            roster_data, standings_df, status = fetch_espn_league_data(league_id, 2026)
+            # UNIFIED FETCH: Rosters + Standings + League Name
+            roster_data, standings_df, league_name, status = fetch_espn_league_data(league_id, 2026)
             
             if status == 'SUCCESS':
+                st.session_state.league_name = league_name # Save dynamic name
+                st.session_state.league_rosters = roster_data # Save for Tab 5
+
                 # Update Rosters
                 roster_players = [p for team in roster_data.values() for p in team]
                 st.session_state.my_roster = [p for p in st.session_state.my_roster if p in roster_players]
@@ -118,11 +123,11 @@ else:
                     st.session_state.espn_standings = standings_df
             
             elif status == 'PRIVATE':
-                st.sidebar.error("Error: League is Private or Invalid ID.")
+                st.sidebar.error("Error: League is Private or Invalid ID. Cannot fetch rosters.")
                 df = st.session_state.initial_df.copy()
 
             elif status == 'FAILED_FETCH':
-                st.sidebar.error("Error fetching ESPN data.")
+                st.sidebar.error("Error fetching ESPN data. Check ID or season.")
                 df = st.session_state.initial_df.copy()
 
         except Exception as e:
@@ -139,7 +144,9 @@ else:
     for s in ['G', 'A', 'Pts', 'PPP', 'SHP', 'SOG', 'Hits', 'BkS', 'FP', 'W', 'Svs', 'SO']:
         if s in df.columns: df[f'ROS_{s}'] = calc_ros(s)
 
-    tab_home, tab_analytics, tab_tools, tab_fantasy = st.tabs(["🏠 Home", "📊 Data & Analytics", "🛠️ Fantasy Tools", "⚔️ My Fantasy Team"])
+    # --- TABS (NOW 5) ---
+    tab_label_5 = f"🏆 {st.session_state.league_name}"
+    tab_home, tab_analytics, tab_tools, tab_fantasy, tab_league = st.tabs(["🏠 Home", "📊 Data & Analytics", "🛠️ Fantasy Tools", "⚔️ My Fantasy Team", tab_label_5])
 
     # ================= TAB 1: HOME =================
     with tab_home:
@@ -274,11 +281,13 @@ else:
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
 
-        # --- TIME FILTER LOGIC ---
+        # --- TIME FILTER LOGIC (FIXED) ---
         if time_filter_league != "Season (2025/26)":
             days_map = {"Last 7 Days": 7, "Last 15 Days": 15, "Last 30 Days": 30}
             days = days_map.get(time_filter_league, 0)
-            start_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=days)
+            
+            # FIXED: Force Start Date to Midnight to avoid missing early games
+            start_date = (datetime.now() - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
             
             with st.spinner(f"Aggregating league activity for last {days} days..."):
                 recent_stats = []
@@ -286,6 +295,7 @@ else:
                     logs = get_player_game_log(row['ID'])
                     if not logs.empty:
                         recent = logs[logs['gameDate'] >= start_date]
+                        
                         if not recent.empty:
                             stat_dict = {
                                 'ID': row['ID'], 'Player': row['Player'], 'Team': row['Team'], 'Pos': row['Pos'],
@@ -301,7 +311,6 @@ else:
                                 'W': len(recent[recent['decision'] == 'W']) if 'decision' in recent.columns else 0,
                                 'SHP': recent['shorthandedPoints'].sum() if 'shorthandedPoints' in recent.columns else 0,
                             }
-                            # Recalculate FP
                             fp = (stat_dict['G']*val_G + stat_dict['A']*val_A + stat_dict['PPP']*val_PPP + 
                                   stat_dict['SOG']*val_SOG + stat_dict['Hits']*val_Hit + stat_dict['BkS']*val_BkS +
                                   stat_dict['W']*val_W + (stat_dict['SHP'] * val_SHP))
@@ -310,7 +319,6 @@ else:
 
                 if recent_stats:
                     recent_df = pd.DataFrame(recent_stats)
-                    # Merge only missing columns, exclude 'ID' from list
                     base_cols = ['Sh%', 'FO%', 'GAA', 'SV%', 'GSAA', 'TOI']
                     existing_base_cols = [c for c in base_cols if c in df.columns]
                     if existing_base_cols:
@@ -352,7 +360,6 @@ else:
                 "BkS": st.column_config.NumberColumn("BkS", format="%.0f", help="Blocked Shots"),
             }
             
-            # FORMATTING LOGIC
             whole_num_cols = ['GWG', 'GP', 'G', 'A', 'Pts', 'PIM', 'SOG', 'W', 'L', 'OTL', 'GA', 'Svs', 'SO', '+/-', 'PPP', 'SHP', 'Hits', 'BkS']
             valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
             styled_df = styled_df.format("{:.0f}", subset=valid_whole)
@@ -380,7 +387,6 @@ else:
         # --- NEW: LEAGUE STANDINGS ---
         if 'espn_standings' in st.session_state and not st.session_state.espn_standings.empty:
             st.subheader("🏆 League Standings")
-            # Convert standings dataframe to styled display
             st.dataframe(
                 st.session_state.espn_standings.style.apply(lambda x: ['background-color: #262730']*len(x), axis=1),
                 use_container_width=True,
@@ -648,3 +654,39 @@ else:
                 st.altair_chart(chart, use_container_width=True)
             else:
                 st.caption("Not enough data to analyze recent trends (Need 5+ games).")
+
+    # ================= TAB 5: LEAGUE ROSTERS =================
+    with tab_league:
+        if st.session_state.get('league_rosters'):
+            # Iterate through each team in the roster dictionary
+            for team_name, players in st.session_state.league_rosters.items():
+                with st.expander(f"**{team_name}** ({len(players)} Players)", expanded=True):
+                    # Build DataFrame for this team's players
+                    # We need to look up NHL ID and Team for the headshot URL
+                    team_player_data = []
+                    for p_name in players:
+                        # Find player in main df to get metadata
+                        match = df[df['Player'] == p_name]
+                        if not match.empty:
+                            pid = match.iloc[0]['ID']
+                            nhl_team = match.iloc[0]['Team']
+                            # Headshot URL
+                            img_url = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team}/{pid}.png"
+                            team_player_data.append({"Headshot": img_url, "Player": p_name})
+                        else:
+                            # Fallback if player not found in active NHL stats (e.g. minor leaguer)
+                            team_player_data.append({"Headshot": "https://assets.nhle.com/mugs/nhl/default.png", "Player": p_name})
+                    
+                    if team_player_data:
+                        t_df = pd.DataFrame(team_player_data)
+                        st.dataframe(
+                            t_df,
+                            column_config={
+                                "Headshot": st.column_config.ImageColumn("Img", width="small"),
+                                "Player": st.column_config.TextColumn("Name")
+                            },
+                            use_container_width=True,
+                            hide_index=True
+                        )
+        else:
+            st.info("Enter a valid League ID in the sidebar to see full league rosters.")
