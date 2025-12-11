@@ -281,13 +281,12 @@ else:
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
 
-        # --- TIME FILTER LOGIC (FIXED) ---
+        # --- TIME FILTER LOGIC ---
         if time_filter_league != "Season (2025/26)":
             days_map = {"Last 7 Days": 7, "Last 15 Days": 15, "Last 30 Days": 30}
             days = days_map.get(time_filter_league, 0)
             
-            # FIXED: Force Start Date to Midnight to avoid missing early games
-            start_date = (datetime.now() - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+            start_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=days)
             
             with st.spinner(f"Aggregating league activity for last {days} days..."):
                 recent_stats = []
@@ -360,6 +359,7 @@ else:
                 "BkS": st.column_config.NumberColumn("BkS", format="%.0f", help="Blocked Shots"),
             }
             
+            # FORMATTING LOGIC
             whole_num_cols = ['GWG', 'GP', 'G', 'A', 'Pts', 'PIM', 'SOG', 'W', 'L', 'OTL', 'GA', 'Svs', 'SO', '+/-', 'PPP', 'SHP', 'Hits', 'BkS']
             valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
             styled_df = styled_df.format("{:.0f}", subset=valid_whole)
@@ -384,7 +384,7 @@ else:
     with tab_tools:
         st.header("⚖️ Trade Analyzer")
         
-        # --- NEW: LEAGUE STANDINGS ---
+        # --- LEAGUE STANDINGS ---
         if 'espn_standings' in st.session_state and not st.session_state.espn_standings.empty:
             st.subheader("🏆 League Standings")
             st.dataframe(
@@ -657,36 +657,50 @@ else:
 
     # ================= TAB 5: LEAGUE ROSTERS =================
     with tab_league:
+        st.header(f"Rosters for {st.session_state.league_name}")
+        
         if st.session_state.get('league_rosters'):
-            # Iterate through each team in the roster dictionary
-            for team_name, players in st.session_state.league_rosters.items():
-                with st.expander(f"**{team_name}** ({len(players)} Players)", expanded=True):
-                    # Build DataFrame for this team's players
-                    # We need to look up NHL ID and Team for the headshot URL
-                    team_player_data = []
-                    for p_name in players:
-                        # Find player in main df to get metadata
-                        match = df[df['Player'] == p_name]
-                        if not match.empty:
-                            pid = match.iloc[0]['ID']
-                            nhl_team = match.iloc[0]['Team']
-                            # Headshot URL
-                            img_url = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team}/{pid}.png"
-                            team_player_data.append({"Headshot": img_url, "Player": p_name})
-                        else:
-                            # Fallback if player not found in active NHL stats (e.g. minor leaguer)
-                            team_player_data.append({"Headshot": "https://assets.nhle.com/mugs/nhl/default.png", "Player": p_name})
+            # Determine the number of columns based on the number of teams, max 4
+            num_teams = len(st.session_state.league_rosters)
+            num_cols = min(num_teams, 4) if num_teams > 0 else 1
+            
+            team_names = list(st.session_state.league_rosters.keys())
+            
+            # Create a header row for the team names
+            header_cols = st.columns(num_cols)
+            for i, name in enumerate(team_names):
+                if i < num_cols:
+                    header_cols[i].subheader(name)
+            
+            # Determine the maximum height needed to prevent cutoff
+            max_players = max([len(roster) for roster in st.session_state.league_rosters.values()]) if num_teams > 0 else 1
+            
+            # Iterate through players up to the max height
+            for player_index in range(max_players):
+                player_cols = st.columns(num_cols)
+                for team_col_index in range(num_cols):
+                    team_name = team_names[team_col_index]
+                    roster = st.session_state.league_rosters[team_name]
                     
-                    if team_player_data:
-                        t_df = pd.DataFrame(team_player_data)
-                        st.dataframe(
-                            t_df,
-                            column_config={
-                                "Headshot": st.column_config.ImageColumn("Img", width="small"),
-                                "Player": st.column_config.TextColumn("Name")
-                            },
-                            use_container_width=True,
-                            hide_index=True
-                        )
+                    if player_index < len(roster):
+                        p_name = roster[player_index]
+                        player_info = df[df['Player'] == p_name]
+
+                        # Safely extract ID and Team for Headshot URL
+                        if not player_info.empty:
+                            pid = player_info.iloc[0]['ID']
+                            nhl_team = player_info.iloc[0]['Team']
+                            img_url = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team}/{pid}.png"
+                        else:
+                            img_url = "https://assets.nhle.com/mugs/nhl/default.png" # Generic Fallback
+
+                        # Display Player
+                        with player_cols[team_col_index]:
+                            st.markdown(f"""
+                            <div style='display: flex; align-items: center; margin-bottom: 5px; padding: 5px; background-color: #262730; border-radius: 4px;'>
+                                <img src="{img_url}" width="30" style="border-radius: 50%; margin-right: 10px;">
+                                <span>{p_name}</span>
+                            </div>
+                            """, unsafe_allow_html=True)
         else:
             st.info("Enter a valid League ID in the sidebar to see full league rosters.")
