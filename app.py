@@ -4,7 +4,7 @@ import altair as alt
 import re
 from datetime import datetime, timedelta
 import requests
-import difflib # Used in data_loader
+import difflib # For fuzzy matching
 from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news, fetch_espn_league_data
 
 st.set_page_config(layout="wide", page_title="Slapshot Stats")
@@ -143,7 +143,7 @@ else:
                 st.session_state.league_name = league_name # Save dynamic name
                 st.session_state.league_rosters = roster_data # Save for Tab 5
 
-                # Update Rosters in main DF
+                # Update Rosters
                 roster_players = [p['Name'] for team in roster_data.values() for p in team]
                 st.session_state.my_roster = [p for p in st.session_state.my_roster if p in roster_players]
 
@@ -307,8 +307,8 @@ else:
             pos = sorted(df['Pos'].unique())
             sel_pos = c2.multiselect("Position", pos, default=pos)
         
-        # REMOVED TIME FILTER DUE TO PERFORMANCE CRASH ON LARGE DATASETS
-        st.caption("Time filtering is only available on 'My Roster' (Tab 4) due to performance constraints.")
+        # REMOVED TIME FILTER FROM LEAGUE SUMMARY DUE TO PERFORMANCE CRASH
+        st.caption("Time filtering is only available on 'My Roster' (Tab 4) due to API performance constraints.")
 
         # --- DATA FILTERING (Static Filters Only) ---
         filt_df = df.copy()
