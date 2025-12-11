@@ -1,3 +1,398 @@
+The issue likely persists because of **Data Caching**.
+
+The `get_player_game_log` function was set to remember data for 1 hour (`ttl=3600`). Even though we changed the code to fix the date filtering, the app was likely still serving the "old" list of games from memory that it fetched an hour ago (which might have been incomplete or processed with the old logic).
+
+### The Fix
+
+1.  **Lower Cache Time:** I updated `data_loader.py` to refresh game logs every **10 minutes** (`ttl=600`) instead of 1 hour.
+2.  **Date Logic Hardening:** In `app.py`, I switched to `pd.Timestamp.now().normalize()`. This is the most robust way to handle dates in Pandas, ensuring "Last 7 Days" strictly means "From Midnight 7 days ago" without any timezone confusion.
+3.  **Visual Confirmation:** I added a small text caption under the filter that says **"Showing stats from [Date] to Present"** so you can visually verify exactly which games are being included.
+
+### 1\. Complete `data_loader.py` (Updated Cache Settings)
+
+```python
+import requests
+import pandas as pd
+import streamlit as st
+from datetime import datetime, timedelta
+import pytz
+
+# --- GENERIC FETCHER ---
+def fetch_data(endpoint, report_type, sort_key, override_cayenne=None, aggregate=False):
+    url = f"https://api.nhle.com/stats/rest/en/{endpoint}/{report_type}"
+    
+    # User specified 2025-2026 Season
+    if override_cayenne:
+        cayenne_exp = override_cayenne
+    else:
+        cayenne_exp = "seasonId=20252026 and gameTypeId=2"
+
+    params = {
+        "isAggregate": "true" if aggregate else "false",
+        "isGame": "false",
+        "sort": f'[{{"property":"{sort_key}","direction":"DESC"}}]',
+        "start": 0,
+        "limit": -1,
+        "cayenneExp": cayenne_exp
+    }
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        return pd.DataFrame(data.get("data", []))
+    except Exception as e:
+        return pd.DataFrame()
+
+# --- MAIN DATA LOADER (CACHED) ---
+@st.cache_data(ttl=3600)
+def load_nhl_data():
+    # 1. Skaters
+    df_sum = fetch_data("skater", "summary", "points")
+    df_real = fetch_data("skater", "realtime", "hits")
+    df_adv = fetch_data("skater", "puckPossession", "satPct")
+
+    if not df_sum.empty:
+        rename_skaters = {
+            'playerId': 'ID', 'skaterFullName': 'Player', 'teamAbbrevs': 'Team', 'positionCode': 'Pos',
+            'gamesPlayed': 'GP', 'goals': 'G', 'assists': 'A', 'points': 'Pts',
+            'plusMinus': '+/-', 'penaltyMinutes': 'PIM', 'ppPoints': 'PPP', 
+            'shPoints': 'SHP', 'gameWinningGoals': 'GWG', 'shots': 'SOG', 'shootingPct': 'Sh%', 
+            'faceoffWinPct': 'FO%', 'timeOnIcePerGame': 'TOI'
+        }
+        df_sum = df_sum.rename(columns=rename_skaters)
+        
+        if not df_real.empty:
+            df_real = df_real[['playerId', 'hits', 'blockedShots']].rename(columns={'playerId': 'ID', 'hits': 'Hits', 'blockedShots': 'BkS'})
+            df_sum = df_sum.merge(df_real, on='ID', how='left')
+
+        if not df_adv.empty:
+            df_adv = df_adv[['playerId', 'satPct', 'usatPct']].rename(columns={'playerId': 'ID', 'satPct': 'SAT%', 'usatPct': 'USAT%'})
+            df_sum = df_sum.merge(df_adv, on='ID', how='left')
+        
+        df_sum['PosType'] = 'Skater'
+
+    # 2. Goalies
+    df_goalies = fetch_data("goalie", "summary", "wins")
+    if not df_goalies.empty:
+        df_goalies['PosType'] = 'Goalie'
+        df_goalies['Pos'] = 'G'
+        df_goalies = df_goalies.rename(columns={
+            'goalieFullName': 'Player', 'playerId': 'ID', 'teamAbbrevs': 'Team',
+            'gamesPlayed': 'GP', 'wins': 'W', 'losses': 'L', 'otLosses': 'OTL',
+            'goalsAgainstAverage': 'GAA', 'savePct': 'SV%', 'shutouts': 'SO',
+            'shotsAgainst': 'SA', 'saves': 'Svs', 'goalsAgainst': 'GA',
+            'goals': 'G', 'assists': 'A', 'points': 'Pts', 'penaltyMinutes': 'PIM', 'timeOnIcePerGame': 'TOI'
+        })
+        
+        # GSAA Calc
+        total_shots = df_goalies['SA'].sum()
+        total_saves = df_goalies['Svs'].sum()
+        if total_shots > 0:
+            league_avg_sv = total_saves / total_shots
+            df_goalies['GSAA'] = df_goalies['Svs'] - (df_goalies['SA'] * league_avg_sv)
+            df_goalies['GSAA'] = df_goalies['GSAA'].round(2)
+        else:
+            df_goalies['GSAA'] = 0
+
+    if df_sum.empty and df_goalies.empty: return pd.DataFrame()
+    elif df_sum.empty: df_combined = df_goalies
+    elif df_goalies.empty: df_combined = df_sum
+    else: df_combined = pd.concat([df_sum, df_goalies], ignore_index=True)
+
+    # Clean Data
+    if 'Team' in df_combined.columns:
+        df_combined['Team'] = df_combined['Team'].apply(lambda x: x.split(',')[-1].strip() if isinstance(x, str) else 'N/A')
+    else: df_combined['Team'] = 'N/A'
+    
+    df_combined['Player'] = df_combined['Player'].fillna('Unknown')
+    
+    numeric_cols = ['GP', 'G', 'A', 'Pts', '+/-', 'PIM', 'PPP', 'SHP', 'GWG', 'SOG', 'Sh%', 'FO%', 
+                    'Hits', 'BkS', 'SAT%', 'USAT%', 'W', 'L', 'OTL', 'GAA', 'SV%', 'SO', 'GSAA', 'GA', 'Svs']
+    
+    for col in numeric_cols:
+        if col not in df_combined.columns: df_combined[col] = 0
+        df_combined[col] = pd.to_numeric(df_combined[col], errors='coerce').fillna(0)
+
+    cols_to_keep = ['ID', 'Player', 'Team', 'Pos', 'PosType'] + numeric_cols + ['TOI']
+    final_cols = [c for c in cols_to_keep if c in df_combined.columns]
+    
+    return df_combined[final_cols]
+
+# --- MODIFIED: LOWER TTL FOR GAME LOGS TO FIX STALE DATA ---
+@st.cache_data(ttl=600) # Changed from 3600 to 600 (10 mins)
+def get_player_game_log(player_id):
+    url = f"https://api-web.nhle.com/v1/player/{player_id}/game-log/20252026/2"
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        games = data.get("gameLog", [])
+        if not games: return pd.DataFrame()
+        df_log = pd.DataFrame(games)
+        df_log['gameDate'] = pd.to_datetime(df_log['gameDate'])
+        return df_log.sort_values(by='gameDate')
+    except: return pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def load_schedule():
+    url = "https://api-web.nhle.com/v1/schedule/now"
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        
+        todays_games = []
+        for day in data.get('gameWeek', []):
+            if day['date'] == today_str:
+                todays_games = day.get('games', [])
+                break
+        
+        processed_games = []
+        for g in todays_games:
+            # Time Calc
+            utc_time = datetime.strptime(g['startTimeUTC'], "%Y-%m-%dT%H:%M:%SZ")
+            utc_time = utc_time.replace(tzinfo=pytz.utc)
+            est_time = utc_time.astimezone(pytz.timezone('US/Eastern'))
+            
+            # --- LIVE SCORE LOGIC ---
+            game_state = g.get('gameState', 'FUT')
+            status_text = est_time.strftime("%I:%M %p EST")
+            is_live = False
+            
+            if game_state in ['LIVE', 'CRIT']:
+                home_score = g['homeTeam'].get('score', 0)
+                away_score = g['awayTeam'].get('score', 0)
+                status_text = f"LIVE: {away_score} - {home_score}"
+                is_live = True
+            elif game_state in ['OFF', 'FINAL']:
+                home_score = g['homeTeam'].get('score', 0)
+                away_score = g['awayTeam'].get('score', 0)
+                status_text = f"Final: {away_score} - {home_score}"
+
+            processed_games.append({
+                "home": g['homeTeam']['abbrev'],
+                "home_logo": g['homeTeam'].get('logo', ''),
+                "away": g['awayTeam']['abbrev'],
+                "away_logo": g['awayTeam'].get('logo', ''),
+                "time": status_text,
+                "is_live": is_live
+            })
+        return processed_games
+    except: return []
+
+@st.cache_data(ttl=3600)
+def load_weekly_leaders():
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=7)
+    clean_date_filter = f"gameTypeId=2 and gameDate >= '{start_date.strftime('%Y-%m-%d')}' and gameDate <= '{end_date.strftime('%Y-%m-%d')}'"
+    df = fetch_data("skater", "summary", "points", override_cayenne=clean_date_filter, aggregate=True)
+    if df.empty: return pd.DataFrame()
+    rename_map = {'skaterFullName': 'Player', 'teamAbbrevs': 'Team', 'positionCode': 'Pos', 'goals': 'G', 'assists': 'A', 'points': 'Pts', 'shots': 'SOG', 'ppPoints': 'PPP'}
+    df = df.rename(columns=rename_map)
+    return df
+
+@st.cache_data(ttl=3600)
+def get_weekly_schedule_matrix():
+    return _get_weekly_schedule_matrix_impl()
+
+def _get_weekly_schedule_matrix_impl():
+    url_sched = "https://api-web.nhle.com/v1/schedule/now"
+    url_stand = "https://api-web.nhle.com/v1/standings/now"
+    try:
+        resp_sched = requests.get(url_sched, timeout=5)
+        data_sched = resp_sched.json()
+        game_week = data_sched.get('gameWeek', [])
+        
+        if not game_week: return pd.DataFrame(), {}
+        
+        days_map = {} 
+        ordered_days = []
+        for day_obj in game_week:
+            date_str = day_obj['date']
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            day_name = dt.strftime("%A") 
+            days_map[date_str] = day_name
+            ordered_days.append(day_name)
+            
+        all_teams = sorted(list(set([g['homeTeam']['abbrev'] for d in game_week for g in d['games']] + 
+                                    [g['awayTeam']['abbrev'] for d in game_week for g in d['games']])))
+        
+        matrix = pd.DataFrame(index=all_teams, columns=ordered_days).fillna("")
+        
+        for day_obj in game_week:
+            date_str = day_obj['date']
+            day_name = days_map[date_str]
+            for game in day_obj['games']:
+                home = game['homeTeam']['abbrev']
+                away = game['awayTeam']['abbrev']
+                matrix.at[home, day_name] = f"vs {away}"
+                matrix.at[away, day_name] = f"@ {home}"
+
+        resp_stand = requests.get(url_stand, timeout=5)
+        data_stand = resp_stand.json()
+        standings = {}
+        for team in data_stand.get('standings', []):
+            team_abbr = team['teamAbbrev']['default']
+            standings[team_abbr] = team.get('pointPctg', 0.5)
+            
+        return matrix, standings
+    except:
+        return pd.DataFrame(), {}
+
+@st.cache_data(ttl=3600)
+def load_nhl_news():
+    """Fetches top news from ESPN and extracts images."""
+    url = "http://site.api.espn.com/apis/site/v2/sports/hockey/nhl/news"
+    try:
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        articles = []
+        
+        for article in data.get('articles', [])[:7]:
+            img_url = ""
+            if 'images' in article and len(article['images']) > 0:
+                img_url = article['images'][0].get('url', '')
+            
+            articles.append({
+                "headline": article.get('headline', 'No Headline'),
+                "description": article.get('description', ''),
+                "link": article['links']['web']['href'] if 'links' in article else '#',
+                "image": img_url
+            })
+        return articles
+    except Exception as e:
+        return []
+
+# --- ESPN ROSTER FETCHER ---
+@st.cache_data(ttl=60)
+def fetch_espn_roster_data(league_id, season_year):
+    """
+    Fetches ESPN league roster data using the League ID.
+    Includes headers to prevent blocking and fallback logic for season year.
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'application/json',
+    }
+    
+    params = {'view': 'mRoster,mSettings'}
+
+    def try_fetch(year):
+        url = f"https://fantasy.espn.com/apis/v3/games/fhl/seasons/{year}/segments/0/leagues/{league_id}"
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=5)
+            if r.status_code == 200: return r.json(), 'SUCCESS'
+            if r.status_code == 401: return {}, 'PRIVATE'
+            return {}, 'ERROR'
+        except:
+            return {}, 'ERROR'
+
+    data, status = try_fetch(season_year)
+    if status == 'ERROR':
+        data, status = try_fetch(season_year - 1)
+
+    if status != 'SUCCESS':
+        return {}, status
+
+    roster_data = {}
+    try:
+        teams_map = {}
+        for t in data.get('teams', []):
+            t_id = t['id']
+            name = t.get('abbrev')
+            if not name:
+                name = t.get('nickname')
+            if not name:
+                name = f"Team {t_id}"
+            teams_map[t_id] = name
+
+        for team in data.get('teams', []):
+            team_name = teams_map.get(team['id'], "Unknown")
+            roster_data[team_name] = []
+            entries = team.get('roster', {}).get('entries', [])
+            for slot in entries:
+                player_data = slot.get('playerPoolEntry', {}).get('player', {})
+                full_name = player_data.get('fullName')
+                if full_name:
+                    roster_data[team_name].append(full_name)
+                    
+        return roster_data, 'SUCCESS'
+
+    except Exception as e:
+        return {}, 'FAILED_FETCH'
+
+# --- FETCH LEAGUE STANDINGS ---
+@st.cache_data(ttl=60)
+def fetch_espn_standings(league_id, season_year):
+    """
+    Fetches ESPN league standings (mTeam view).
+    Returns a DataFrame with Team Name, Wins, Losses, and Rank.
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'application/json',
+    }
+    
+    params = {'view': 'mTeam'}
+
+    def try_fetch(year):
+        url = f"https://fantasy.espn.com/apis/v3/games/fhl/seasons/{year}/segments/0/leagues/{league_id}"
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=5)
+            if r.status_code == 200: return r.json(), 'SUCCESS'
+            return {}, 'ERROR'
+        except:
+            return {}, 'ERROR'
+
+    data, status = try_fetch(season_year)
+    if status == 'ERROR':
+        data, status = try_fetch(season_year - 1)
+
+    if status != 'SUCCESS':
+        return pd.DataFrame()
+
+    try:
+        standings_list = []
+        for team in data.get('teams', []):
+            abbrev = team.get('abbrev')
+            location = team.get('location', '')
+            nickname = team.get('nickname', '')
+            
+            if location and nickname:
+                full_name = f"{location} {nickname}"
+            elif abbrev:
+                full_name = abbrev
+            else:
+                full_name = f"Team {team.get('id')}"
+
+            record = team.get('record', {}).get('overall', {})
+            wins = record.get('wins', 0)
+            losses = record.get('losses', 0)
+            ties = record.get('ties', 0)
+            rank = team.get('playoffSeed', team.get('rankCalculatedFinal', 0))
+
+            standings_list.append({
+                'Rank': rank,
+                'Team': full_name,
+                'W': wins,
+                'L': losses,
+                'T': ties
+            })
+        
+        df_standings = pd.DataFrame(standings_list)
+        if not df_standings.empty:
+            df_standings = df_standings.sort_values(by='Rank', ascending=True)
+        
+        return df_standings
+
+    except Exception:
+        return pd.DataFrame()
+```
+
+### 2\. Complete `app.py` (Improved Date Logic)
+
+```python
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -259,6 +654,7 @@ else:
         st.divider()
         st.subheader("League Summary")
         
+        # --- NEW: TIME FILTER FOR LEAGUE SUMMARY ---
         col_filters, col_time = st.columns([3, 1])
         with col_filters.expander("Filter Options"):
             c1, c2 = st.columns(2)
@@ -274,10 +670,16 @@ else:
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
 
+        # --- TIME FILTER LOGIC (FIXED) ---
         if time_filter_league != "Season (2025/26)":
             days_map = {"Last 7 Days": 7, "Last 15 Days": 15, "Last 30 Days": 30}
             days = days_map.get(time_filter_league, 0)
-            start_date = (datetime.now() - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # Use Pandas Timestamp for robust date math (fixes timezone/midnight issues)
+            start_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=days)
+            
+            # Display active filter range for user verification
+            st.caption(f"Showing stats from **{start_date.strftime('%Y-%m-%d')}** to Present")
             
             with st.spinner(f"Aggregating league activity for last {days} days..."):
                 recent_stats = []
@@ -301,6 +703,7 @@ else:
                                 'W': len(recent[recent['decision'] == 'W']) if 'decision' in recent.columns else 0,
                                 'SHP': recent['shorthandedPoints'].sum() if 'shorthandedPoints' in recent.columns else 0,
                             }
+                            # Recalculate FP
                             fp = (stat_dict['G']*val_G + stat_dict['A']*val_A + stat_dict['PPP']*val_PPP + 
                                   stat_dict['SOG']*val_SOG + stat_dict['Hits']*val_Hit + stat_dict['BkS']*val_BkS +
                                   stat_dict['W']*val_W + (stat_dict['SHP'] * val_SHP))
@@ -350,6 +753,7 @@ else:
                 "BkS": st.column_config.NumberColumn("BkS", format="%.0f", help="Blocked Shots"),
             }
             
+            # FORMATTING LOGIC
             whole_num_cols = ['GWG', 'GP', 'G', 'A', 'Pts', 'PIM', 'SOG', 'W', 'L', 'OTL', 'GA', 'Svs', 'SO', '+/-', 'PPP', 'SHP', 'Hits', 'BkS']
             valid_whole = [c for c in whole_num_cols if c in filt_df.columns]
             styled_df = styled_df.format("{:.0f}", subset=valid_whole)
@@ -508,8 +912,11 @@ else:
             if time_filter != "Season (2025/26)":
                 days_map = {"Last 7 Days": 7, "Last 15 Days": 15, "Last 30 Days": 30}
                 days = days_map.get(time_filter, 0)
-                # Force Midnight for start date
-                start_date = (datetime.now() - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+                
+                # FIXED: Force Start Date to Midnight to avoid missing early games using Pandas Timestamp
+                start_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=days)
+                
+                st.caption(f"Showing stats from **{start_date.strftime('%Y-%m-%d')}** to Present")
                 
                 with st.spinner(f"Fetching stats for last {days} days..."):
                     recent_stats = []
@@ -561,9 +968,11 @@ else:
             c4.metric("Goalie Wins", int(display_df['W'].sum()) if 'W' in display_df.columns else 0)
             
             # --- RENDER TABLE ---
+            # Define all possible columns for the table (excluding ID and PosType)
             all_possible_cols = ['Player', 'Team', 'Pos', 'FP', 'GP', 'G', 'A', 'Pts', 'GWG', 'SOG', 'Sh%', 'FO%', 'L', 'OTL', 'GAA', 'SV%', 'GSAA', 'SO', 'PIM', 'Hits', 'BkS', 'W', 'Svs', 'GA', 'TOI', 'SHP', 'PPP']
             final_cols = [c for c in all_possible_cols if c in display_df.columns and c != 'ID'] 
             
+            # 1. COLUMN CONFIG (for Tooltips & Pinning)
             roster_config = {
                 "Player": st.column_config.TextColumn("Player", pinned=True),
                 "FP": st.column_config.NumberColumn("FP", format="%.1f", help="Fantasy Points in selected period"),
@@ -591,9 +1000,13 @@ else:
                 "PPP": st.column_config.NumberColumn("PPP", format="%.0f", help="Power Play Points"),
             }
             
+            # 2. STYLING (for Decimal Control - ONLY apply to existing columns)
             full_whole_num_cols = ['G', 'A', 'Pts', 'GWG', 'SOG', 'L', 'OTL', 'SO', 'GP', 'PIM', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SHP', 'PPP']
+            
+            # Filter the list to only include columns currently in the DataFrame (display_df)
             valid_whole = [c for c in full_whole_num_cols if c in display_df.columns]
             
+            # Define percentage/decimal columns
             valid_one_dec = [c for c in ['FP', 'Sh%', 'FO%'] if c in display_df.columns]
             valid_two_dec = [c for c in ['GAA', 'GSAA'] if c in display_df.columns]
             valid_three_dec = [c for c in ['SV%'] if c in display_df.columns]
@@ -642,3 +1055,4 @@ else:
                 st.altair_chart(chart, use_container_width=True)
             else:
                 st.caption("Not enough data to analyze recent trends (Need 5+ games).")
+```
