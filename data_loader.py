@@ -71,6 +71,7 @@ def load_nhl_data():
             'goals': 'G', 'assists': 'A', 'points': 'Pts', 'penaltyMinutes': 'PIM', 'timeOnIcePerGame': 'TOI'
         })
         
+        # GSAA Calc
         total_shots = df_goalies['SA'].sum()
         total_saves = df_goalies['Svs'].sum()
         if total_shots > 0:
@@ -134,10 +135,12 @@ def load_schedule():
         
         processed_games = []
         for g in todays_games:
+            # Time Calc
             utc_time = datetime.strptime(g['startTimeUTC'], "%Y-%m-%dT%H:%M:%SZ")
             utc_time = utc_time.replace(tzinfo=pytz.utc)
             est_time = utc_time.astimezone(pytz.timezone('US/Eastern'))
             
+            # --- LIVE SCORE LOGIC ---
             game_state = g.get('gameState', 'FUT')
             status_text = est_time.strftime("%I:%M %p EST")
             is_live = False
@@ -246,23 +249,20 @@ def load_nhl_news():
     except Exception as e:
         return []
 
-# --- NEW ESPN LEAGUE FETCHER (Robust Version) ---
+# --- ESPN ROSTER FETCHER ---
 @st.cache_data(ttl=60)
 def fetch_espn_roster_data(league_id, season_year):
     """
     Fetches ESPN league roster data using the League ID.
     Includes headers to prevent blocking and fallback logic for season year.
     """
-    # Define standard headers to mimic a browser
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Accept': 'application/json',
     }
     
-    # Required parameters
     params = {'view': 'mRoster,mSettings'}
 
-    # Helper function to try a request
     def try_fetch(year):
         url = f"https://fantasy.espn.com/apis/v3/games/fhl/seasons/{year}/segments/0/leagues/{league_id}"
         try:
@@ -273,25 +273,18 @@ def fetch_espn_roster_data(league_id, season_year):
         except:
             return {}, 'ERROR'
 
-    # 1. Try Primary Season (2026 for 2025-26)
     data, status = try_fetch(season_year)
-    
-    # 2. Fallback: If 2026 fails (maybe league created early?), try 2025
     if status == 'ERROR':
         data, status = try_fetch(season_year - 1)
 
     if status != 'SUCCESS':
         return {}, status
 
-    # Parse Data
     roster_data = {}
     try:
-        # Map Member IDs to Team Names/Abbrevs
-        # Sometimes 'abbrev' is missing, so we fallback to 'nickname' or 'location'
         teams_map = {}
         for t in data.get('teams', []):
             t_id = t['id']
-            # Try abbrev -> nickname -> "Team X"
             name = t.get('abbrev')
             if not name:
                 name = t.get('nickname')
@@ -299,11 +292,9 @@ def fetch_espn_roster_data(league_id, season_year):
                 name = f"Team {t_id}"
             teams_map[t_id] = name
 
-        # Extract Rosters
         for team in data.get('teams', []):
             team_name = teams_map.get(team['id'], "Unknown")
             roster_data[team_name] = []
-            
             entries = team.get('roster', {}).get('entries', [])
             for slot in entries:
                 player_data = slot.get('playerPoolEntry', {}).get('player', {})
@@ -315,3 +306,77 @@ def fetch_espn_roster_data(league_id, season_year):
 
     except Exception as e:
         return {}, 'FAILED_FETCH'
+
+# --- NEW: FETCH LEAGUE STANDINGS ---
+@st.cache_data(ttl=60)
+def fetch_espn_standings(league_id, season_year):
+    """
+    Fetches ESPN league standings (mTeam view).
+    Returns a DataFrame with Team Name, Wins, Losses, and Rank.
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'application/json',
+    }
+    
+    # We specifically need 'mTeam' to get the record
+    params = {'view': 'mTeam'}
+
+    def try_fetch(year):
+        url = f"https://fantasy.espn.com/apis/v3/games/fhl/seasons/{year}/segments/0/leagues/{league_id}"
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=5)
+            if r.status_code == 200: return r.json(), 'SUCCESS'
+            return {}, 'ERROR'
+        except:
+            return {}, 'ERROR'
+
+    # Try 2026, fallback to 2025
+    data, status = try_fetch(season_year)
+    if status == 'ERROR':
+        data, status = try_fetch(season_year - 1)
+
+    if status != 'SUCCESS':
+        return pd.DataFrame()
+
+    try:
+        standings_list = []
+        for team in data.get('teams', []):
+            # Team Name
+            abbrev = team.get('abbrev')
+            location = team.get('location', '')
+            nickname = team.get('nickname', '')
+            
+            if location and nickname:
+                full_name = f"{location} {nickname}"
+            elif abbrev:
+                full_name = abbrev
+            else:
+                full_name = f"Team {team.get('id')}"
+
+            # Record
+            record = team.get('record', {}).get('overall', {})
+            wins = record.get('wins', 0)
+            losses = record.get('losses', 0)
+            ties = record.get('ties', 0)
+            points = record.get('points', 0) # Points for
+            
+            # Rank
+            rank = team.get('playoffSeed', team.get('rankCalculatedFinal', 0))
+
+            standings_list.append({
+                'Rank': rank,
+                'Team': full_name,
+                'W': wins,
+                'L': losses,
+                'T': ties
+            })
+        
+        df_standings = pd.DataFrame(standings_list)
+        if not df_standings.empty:
+            df_standings = df_standings.sort_values(by='Rank', ascending=True)
+        
+        return df_standings
+
+    except Exception:
+        return pd.DataFrame()
