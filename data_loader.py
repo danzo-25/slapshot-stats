@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta
 import pytz
-import difflib # Added for fuzzy matching
+import difflib # For fuzzy matching
 
 # --- GENERIC FETCHER ---
 def fetch_data(endpoint, report_type, sort_key, override_cayenne=None, aggregate=False):
@@ -86,7 +86,6 @@ def load_nhl_data():
     elif df_goalies.empty: df_combined = df_sum
     else: df_combined = pd.concat([df_sum, df_goalies], ignore_index=True)
 
-    # Clean Data
     if 'Team' in df_combined.columns:
         df_combined['Team'] = df_combined['Team'].apply(lambda x: x.split(',')[-1].strip() if isinstance(x, str) else 'N/A')
     else: df_combined['Team'] = 'N/A'
@@ -226,7 +225,6 @@ def _get_weekly_schedule_matrix_impl():
 
 @st.cache_data(ttl=3600)
 def load_nhl_news():
-    """Fetches top news from ESPN and extracts images."""
     url = "http://site.api.espn.com/apis/site/v2/sports/hockey/nhl/news"
     try:
         response = requests.get(url, timeout=5)
@@ -249,21 +247,17 @@ def load_nhl_news():
         return []
 
 # --- NEW: NHL STANDINGS FETCHERS ---
-
 def get_standings_url(view_type):
-    """Returns the NHL API standings endpoint based on the required view."""
-    # The NHL API structure for standings usually follows this pattern
-    if view_type == 'League':
-        return "https://api-web.nhle.com/v1/standings/current/league"
-    elif view_type == 'Conference':
-        return "https://api-web.nhle.com/v1/standings/current/conference"
-    elif view_type == 'Division':
-        return "https://api-web.nhle.com/v1/standings/current/division"
-    return "https://api-web.nhle.com/v1/standings/current/league" # Default
+    if view_type == 'League (Overall)':
+        return "https://api-web.nhle.com/v1/standings/now"
+    # The API doesn't actually change endpoint for conference/division usually, 
+    # it just changes the returned structure or we have to filter it.
+    # But sticking to the reliable V1 endpoint:
+    return "https://api-web.nhle.com/v1/standings/now"
 
-@st.cache_data(ttl=300) # Refresh NHL Standings every 5 mins
+@st.cache_data(ttl=300)
 def fetch_nhl_standings(view_type):
-    url = get_standings_url(view_type)
+    url = "https://api-web.nhle.com/v1/standings/now"
     
     try:
         response = requests.get(url, timeout=5)
@@ -272,47 +266,51 @@ def fetch_nhl_standings(view_type):
         
         standings_data = []
         
-        # The V1 Standings API returns a list of dictionaries, one for each group (Conference/Division/League)
-        # We process the data based on the grouping keys
-        
-        for group in data.get('standings', []):
-            group_name = group.get('groupName') # e.g., 'Eastern', 'Atlantic'
+        for team_entry in data.get('standings', []):
+            team_abbr = team_entry.get('teamAbbrev', {}).get('default')
+            team_name = team_entry.get('teamName', {}).get('default')
             
-            for team_entry in group.get('teamRecords', []):
-                team_data = team_entry.get('team', {})
-                team_abbr = team_data.get('abbrev', {}).get('default')
-                
-                # Extract record details
-                record = team_entry.get('leagueRecord', {})
-                stats = team_entry.get('status', {})
-                
-                standings_data.append({
-                    'Group': group_name,
-                    'Team': team_data.get('name', {}).get('default', 'N/A'),
-                    'Abbrev': team_abbr,
-                    'Icon': f"https://assets.nhle.com/logos/nhl/svg/{team_abbr}_light.svg",
-                    'GP': team_entry.get('gamesPlayed', 0),
-                    'W': record.get('wins', 0),
-                    'L': record.get('losses', 0),
-                    'OTL': record.get('otLosses', 0),
-                    'PTS': team_entry.get('points', 0),
-                    'P%': team_entry.get('pointPct', 0),
-                    'Rank': team_entry.get('clinchIndicator', team_entry.get('divisionRank', team_entry.get('conferenceRank', 0))),
-                })
+            # Extract grouping info
+            conf = team_entry.get('conferenceName')
+            div = team_entry.get('divisionName')
+            
+            # Determine Rank based on view type
+            if view_type == 'Conference':
+                rank = team_entry.get('conferenceSequence')
+                group = conf
+            elif view_type == 'Division':
+                rank = team_entry.get('divisionSequence')
+                group = div
+            else: # League
+                rank = team_entry.get('leagueSequence')
+                group = 'NHL'
 
-        return pd.DataFrame(standings_data)
+            standings_data.append({
+                'Group': group,
+                'Team': team_name,
+                'Abbrev': team_abbr,
+                'Icon': f"https://assets.nhle.com/logos/nhl/svg/{team_abbr}_light.svg",
+                'GP': team_entry.get('gamesPlayed', 0),
+                'W': team_entry.get('wins', 0),
+                'L': team_entry.get('losses', 0),
+                'OTL': team_entry.get('otLosses', 0),
+                'PTS': team_entry.get('points', 0),
+                'P%': team_entry.get('pointPctg', 0),
+                'Rank': rank
+            })
+
+        df = pd.DataFrame(standings_data)
+        if not df.empty:
+            df = df.sort_values(by=['Group', 'Rank'], ascending=[True, True])
+        return df
         
     except Exception as e:
         return pd.DataFrame()
 
 
-# --- NEW: UNIFIED ESPN LEAGUE FETCHER (Rosters + Standings + League Name) ---
+# --- NEW: UNIFIED ESPN LEAGUE FETCHER ---
 @st.cache_data(ttl=60)
 def fetch_espn_league_data(league_id, season_year):
-    """
-    Fetches ESPN league data, matches player names to NHL stats using fuzzy matching, 
-    and returns rosters ready for rendering (with ID/Team attached).
-    """
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Accept': 'application/json',
@@ -338,25 +336,34 @@ def fetch_espn_league_data(league_id, season_year):
 
     league_name = data.get('settings', {}).get('name', 'League Rosters')
 
+    # --- Fetch Main NHL Data for Matching ---
     try:
         nhl_df = load_nhl_data() 
         nhl_player_names = nhl_df['Player'].tolist()
-        nhl_metadata = {row['Player']: {'ID': row['ID'], 'Team': row['Team']} for _, row in nhl_df[['Player', 'ID', 'Team']].dropna(subset=['Player']).iterrows()}
+        # Create a detailed lookup dict
+        nhl_metadata = {
+            row['Player']: {'ID': row['ID'], 'Team': row['Team']} 
+            for _, row in nhl_df[['Player', 'ID', 'Team']].dropna(subset=['Player']).iterrows()
+        }
     except:
         nhl_player_names = []
         nhl_metadata = {}
     
+    # --- Helper Matching Function ---
     def find_metadata(roster_name):
         rn = str(roster_name).strip()
+        # 1. Exact Match
         if rn in nhl_metadata: return nhl_metadata[rn]
         
-        candidate = difflib.get_close_matches(rn, nhl_player_names, n=1, cutoff=0.7)
-        if candidate and candidate[0] in nhl_metadata:
-            return nhl_metadata[candidate[0]]
+        # 2. Fuzzy Match 
+        if nhl_player_names:
+            candidate = difflib.get_close_matches(rn, nhl_player_names, n=1, cutoff=0.6) # Lowered cutoff slightly
+            if candidate and candidate[0] in nhl_metadata:
+                return nhl_metadata[candidate[0]]
         
         return None
 
-    # 1. PARSE ROSTERS and ATTACH METADATA
+    # 1. PARSE ROSTERS
     roster_data = {}
     try:
         teams_map = {}
@@ -379,10 +386,12 @@ def fetch_espn_league_data(league_id, season_year):
                 if full_name:
                     meta = find_metadata(full_name)
                     
+                    # Store COMPLETE ready-to-use data
                     roster_entry = {
                         'Name': full_name,
-                        'ID': str(meta.get('ID', 0)).strip(),
-                        'NHLTeam': str(meta.get('Team', 'N/A')).strip()
+                        'ID': str(meta['ID']).strip() if meta else '0',
+                        'NHLTeam': str(meta['Team']).strip() if meta else 'N/A',
+                        'Headshot': f"https://assets.nhle.com/mugs/nhl/20252026/{meta['Team']}/{meta['ID']}.png" if meta else "https://assets.nhle.com/mugs/nhl/default.png"
                     }
                     roster_data[team_name].append(roster_entry)
     except:
