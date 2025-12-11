@@ -1,16 +1,3 @@
-The issue likely persists because of **Data Caching**.
-
-The `get_player_game_log` function was set to remember data for 1 hour (`ttl=3600`). Even though we changed the code to fix the date filtering, the app was likely still serving the "old" list of games from memory that it fetched an hour ago (which might have been incomplete or processed with the old logic).
-
-### The Fix
-
-1.  **Lower Cache Time:** I updated `data_loader.py` to refresh game logs every **10 minutes** (`ttl=600`) instead of 1 hour.
-2.  **Date Logic Hardening:** In `app.py`, I switched to `pd.Timestamp.now().normalize()`. This is the most robust way to handle dates in Pandas, ensuring "Last 7 Days" strictly means "From Midnight 7 days ago" without any timezone confusion.
-3.  **Visual Confirmation:** I added a small text caption under the filter that says **"Showing stats from [Date] to Present"** so you can visually verify exactly which games are being included.
-
-### 1\. Complete `data_loader.py` (Updated Cache Settings)
-
-```python
 import requests
 import pandas as pd
 import streamlit as st
@@ -1056,3 +1043,4 @@ else:
             else:
                 st.caption("Not enough data to analyze recent trends (Need 5+ games).")
 ```
+
