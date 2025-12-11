@@ -660,42 +660,51 @@ else:
         st.header(f"Rosters for {st.session_state.league_name}")
         
         if st.session_state.get('league_rosters'):
-            # Determine the number of columns based on the number of teams, max 4
-            num_teams = len(st.session_state.league_rosters)
+            roster_dict = st.session_state.league_rosters
+            team_names = list(roster_dict.keys())
+            num_teams = len(team_names)
+            
+            # Max 4 columns for display consistency
             num_cols = min(num_teams, 4) if num_teams > 0 else 1
+            max_players = max([len(roster) for roster in roster_dict.values()]) if num_teams > 0 else 1
+
+            # Get player metadata once for efficiency
+            # Create a lookup series for quick ID/Team retrieval
+            player_metadata = df[['ID', 'Team']].set_index('Player')
             
-            team_names = list(st.session_state.league_rosters.keys())
+            # Create a list of columns for the Streamlit grid (max 4)
+            st_cols = st.columns(num_cols)
             
-            # Create a header row for the team names
-            header_cols = st.columns(num_cols)
-            for i, name in enumerate(team_names):
-                if i < num_cols:
-                    header_cols[i].subheader(name)
+            # 1. RENDER TEAM NAMES (Headers)
+            for i in range(num_cols):
+                if i < num_teams:
+                    st_cols[i].subheader(team_names[i])
             
-            # Determine the maximum height needed to prevent cutoff
-            max_players = max([len(roster) for roster in st.session_state.league_rosters.values()]) if num_teams > 0 else 1
-            
-            # Iterate through players up to the max height
+            # 2. RENDER PLAYERS (Grid)
             for player_index in range(max_players):
-                player_cols = st.columns(num_cols)
+                player_row = st.columns(num_cols)
+                
                 for team_col_index in range(num_cols):
                     team_name = team_names[team_col_index]
-                    roster = st.session_state.league_rosters[team_name]
+                    roster = roster_dict[team_name]
                     
                     if player_index < len(roster):
                         p_name = roster[player_index]
-                        player_info = df[df['Player'] == p_name]
-
-                        # Safely extract ID and Team for Headshot URL
-                        if not player_info.empty:
-                            pid = player_info.iloc[0]['ID']
-                            nhl_team = player_info.iloc[0]['Team']
+                        
+                        # --- ROBUST METADATA LOOKUP ---
+                        metadata = player_metadata.loc[player_metadata.index.isin([p_name])]
+                        
+                        if not metadata.empty:
+                            pid = metadata.iloc[0]['ID']
+                            nhl_team = metadata.iloc[0]['Team']
+                            # Headshot URL: Use 20252026 season and player metadata
                             img_url = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team}/{pid}.png"
                         else:
-                            img_url = "https://assets.nhle.com/mugs/nhl/default.png" # Generic Fallback
-
-                        # Display Player
-                        with player_cols[team_col_index]:
+                            # Fallback if player name from ESPN doesn't match NHL stats (Minor Leaguer, Prospect)
+                            img_url = "https://assets.nhle.com/mugs/nhl/default.png" 
+                        
+                        # Display Player Card
+                        with player_row[team_col_index]:
                             st.markdown(f"""
                             <div style='display: flex; align-items: center; margin-bottom: 5px; padding: 5px; background-color: #262730; border-radius: 4px;'>
                                 <img src="{img_url}" width="30" style="border-radius: 50%; margin-right: 10px;">
