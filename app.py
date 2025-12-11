@@ -135,7 +135,7 @@ else:
     if league_id:
         try:
             # UNIFIED FETCH: Rosters + Standings + League Name
-            roster_data, standings_df, league_name, status = fetch_espn_league_data(league_id, 2026)
+            roster_data, standings_df, league_name, status = fetch_espn_league_data(league_id, 2025)
             
             if status == 'SUCCESS':
                 st.session_state.league_name = league_name # Save dynamic name
@@ -777,3 +777,4 @@ else:
                 st.write(unmatched[:30])
             else:
                 st.success("All roster names mapped (exact/case-insensitive/fuzzy) to players in df.")
+
