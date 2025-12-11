@@ -3,7 +3,8 @@ import pandas as pd
 import altair as alt
 import re
 from datetime import datetime, timedelta
-import requests # Needed for the URL check in Tab 5
+import requests
+import difflib # Used in data_loader
 from data_loader import load_nhl_data, get_player_game_log, load_schedule, load_weekly_leaders, get_weekly_schedule_matrix, load_nhl_news, fetch_espn_league_data
 
 st.set_page_config(layout="wide", page_title="Slapshot Stats")
@@ -41,12 +42,14 @@ st.markdown("""
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
         gap: 20px;
+        margin-top: 20px;
     }
     .team-roster-box {
         padding: 15px;
         border: 1px solid #333;
         border-radius: 8px;
         background-color: #1e1e1e;
+        min-height: 400px; /* Ensure structure is visible even if rosters are small */
     }
     .roster-player-item {
         display: flex;
@@ -140,7 +143,7 @@ else:
                 st.session_state.league_name = league_name # Save dynamic name
                 st.session_state.league_rosters = roster_data # Save for Tab 5
 
-                # Update Rosters
+                # Update Rosters in main DF
                 roster_players = [p['Name'] for team in roster_data.values() for p in team]
                 st.session_state.my_roster = [p for p in st.session_state.my_roster if p in roster_players]
 
@@ -304,57 +307,13 @@ else:
             pos = sorted(df['Pos'].unique())
             sel_pos = c2.multiselect("Position", pos, default=pos)
         
-        time_filter_league = col_time.selectbox("Show Activity From", ["Season (2025/26)", "Last 7 Days", "Last 15 Days", "Last 30 Days"])
+        # REMOVED TIME FILTER DUE TO PERFORMANCE CRASH ON LARGE DATASETS
+        st.caption("Time filtering is only available on 'My Roster' (Tab 4) due to performance constraints.")
 
-        # --- DATA FILTERING ---
+        # --- DATA FILTERING (Static Filters Only) ---
         filt_df = df.copy()
         if sel_teams: filt_df = filt_df[filt_df['Team'].isin(sel_teams)]
         if sel_pos: filt_df = filt_df[filt_df['Pos'].isin(sel_pos)]
-
-        # --- TIME FILTER LOGIC ---
-        if time_filter_league != "Season (2025/26)":
-            days_map = {"Last 7 Days": 7, "Last 15 Days": 15, "Last 30 Days": 30}
-            days = days_map.get(time_filter_league, 0)
-            
-            start_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=days)
-            
-            with st.spinner(f"Aggregating league activity for last {days} days..."):
-                recent_stats = []
-                for _, row in filt_df.iterrows():
-                    logs = get_player_game_log(row['ID'])
-                    if not logs.empty:
-                        recent = logs[logs['gameDate'] >= start_date]
-                        
-                        if not recent.empty:
-                            stat_dict = {
-                                'ID': row['ID'], 'Player': row['Player'], 'Team': row['Team'], 'Pos': row['Pos'],
-                                'GP': len(recent),
-                                'G': recent['goals'].sum() if 'goals' in recent.columns else 0,
-                                'A': recent['assists'].sum() if 'assists' in recent.columns else 0,
-                                'Pts': recent['points'].sum() if 'points' in recent.columns else 0,
-                                'SOG': recent['shots'].sum() if 'shots' in recent.columns else 0,
-                                'PPP': recent['powerPlayPoints'].sum() if 'powerPlayPoints' in recent.columns else 0,
-                                'Hits': recent['hits'].sum() if 'hits' in recent.columns else 0,
-                                'BkS': recent['blockedShots'].sum() if 'blockedShots' in recent.columns else 0,
-                                'PIM': recent['pim'].sum() if 'pim' in recent.columns else 0,
-                                'W': len(recent[recent['decision'] == 'W']) if 'decision' in recent.columns else 0,
-                                'SHP': recent['shorthandedPoints'].sum() if 'shorthandedPoints' in recent.columns else 0,
-                            }
-                            fp = (stat_dict['G']*val_G + stat_dict['A']*val_A + stat_dict['PPP']*val_PPP + 
-                                  stat_dict['SOG']*val_SOG + stat_dict['Hits']*val_Hit + stat_dict['BkS']*val_BkS +
-                                  stat_dict['W']*val_W + (stat_dict['SHP'] * val_SHP))
-                            stat_dict['FP'] = fp
-                            recent_stats.append(stat_dict)
-
-                if recent_stats:
-                    recent_df = pd.DataFrame(recent_stats)
-                    base_cols = ['Sh%', 'FO%', 'GAA', 'SV%', 'GSAA', 'TOI']
-                    existing_base_cols = [c for c in base_cols if c in df.columns]
-                    if existing_base_cols:
-                        recent_df = recent_df.merge(df[['ID'] + existing_base_cols], on='ID', how='left')
-                    filt_df = recent_df
-                else:
-                    filt_df = pd.DataFrame()
 
         # --- RENDER TABLE ---
         if not filt_df.empty:
@@ -696,14 +655,7 @@ else:
             # Create a combined HTML string for the entire grid
             html_grid = ['<div class="league-grid-container">']
 
-            # Helper to check image URL status (required for robust fallback)
-            def url_ok(url, timeout=0.5):
-                try:
-                    resp = requests.head(url, timeout=timeout) 
-                    return resp.status_code == 200
-                except Exception:
-                    return False
-            
+            # Helper to generate a placeholder image
             fallback_img = "https://assets.nhle.com/mugs/nhl/default.png"
             
             for team_name in team_names:
@@ -719,16 +671,11 @@ else:
                     
                     img_url = fallback_img
                     
-                    # Only attempt CDN check if we have valid metadata
+                    # Only attempt CDN URL if metadata seems valid
                     if pid != '0' and nhl_team != 'N/A':
-                        potential_url = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team}/{pid}.png"
-                        
-                        # NOTE: Removing the costly requests.head check, as it slows down initial render too much. 
-                        # We will assume the NHL CDN URL is correct if the data exists, and rely on the browser's 
-                        # broken image fallback if it's not.
-                        img_url = potential_url 
+                        img_url = f"https://assets.nhle.com/mugs/nhl/20252026/{nhl_team}/{pid}.png"
                     
-                    # RENDER PLAYER ITEM
+                    # RENDER PLAYER ITEM with browser fallback (onerror)
                     team_html.append(f"""
                         <div class="roster-player-item">
                             <img src="{img_url}" class="player-headshot" onerror="this.onerror=null; this.src='{fallback_img}';">
