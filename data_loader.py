@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta
 import pytz
-import difflib # For fuzzy matching
+import difflib
 
 # --- GENERIC FETCHER ---
 def fetch_data(endpoint, report_type, sort_key, override_cayenne=None, aggregate=False):
@@ -246,13 +246,8 @@ def load_nhl_news():
     except Exception as e:
         return []
 
-# --- NEW: NHL STANDINGS FETCHERS ---
+# --- FETCH NHL STANDINGS ---
 def get_standings_url(view_type):
-    if view_type == 'League (Overall)':
-        return "https://api-web.nhle.com/v1/standings/now"
-    # The API doesn't actually change endpoint for conference/division usually, 
-    # it just changes the returned structure or we have to filter it.
-    # But sticking to the reliable V1 endpoint:
     return "https://api-web.nhle.com/v1/standings/now"
 
 @st.cache_data(ttl=300)
@@ -270,11 +265,9 @@ def fetch_nhl_standings(view_type):
             team_abbr = team_entry.get('teamAbbrev', {}).get('default')
             team_name = team_entry.get('teamName', {}).get('default')
             
-            # Extract grouping info
             conf = team_entry.get('conferenceName')
             div = team_entry.get('divisionName')
             
-            # Determine Rank based on view type
             if view_type == 'Conference':
                 rank = team_entry.get('conferenceSequence')
                 group = conf
@@ -308,7 +301,7 @@ def fetch_nhl_standings(view_type):
         return pd.DataFrame()
 
 
-# --- NEW: UNIFIED ESPN LEAGUE FETCHER ---
+# --- UNIFIED ESPN LEAGUE FETCHER ---
 @st.cache_data(ttl=60)
 def fetch_espn_league_data(league_id, season_year):
     headers = {
@@ -336,31 +329,20 @@ def fetch_espn_league_data(league_id, season_year):
 
     league_name = data.get('settings', {}).get('name', 'League Rosters')
 
-    # --- Fetch Main NHL Data for Matching ---
     try:
         nhl_df = load_nhl_data() 
         nhl_player_names = nhl_df['Player'].tolist()
-        # Create a detailed lookup dict
-        nhl_metadata = {
-            row['Player']: {'ID': row['ID'], 'Team': row['Team']} 
-            for _, row in nhl_df[['Player', 'ID', 'Team']].dropna(subset=['Player']).iterrows()
-        }
+        nhl_metadata = {row['Player']: {'ID': row['ID'], 'Team': row['Team']} for _, row in nhl_df[['Player', 'ID', 'Team']].dropna(subset=['Player']).iterrows()}
     except:
         nhl_player_names = []
         nhl_metadata = {}
     
-    # --- Helper Matching Function ---
     def find_metadata(roster_name):
         rn = str(roster_name).strip()
-        # 1. Exact Match
         if rn in nhl_metadata: return nhl_metadata[rn]
-        
-        # 2. Fuzzy Match 
-        if nhl_player_names:
-            candidate = difflib.get_close_matches(rn, nhl_player_names, n=1, cutoff=0.6) # Lowered cutoff slightly
-            if candidate and candidate[0] in nhl_metadata:
-                return nhl_metadata[candidate[0]]
-        
+        candidate = difflib.get_close_matches(rn, nhl_player_names, n=1, cutoff=0.6)
+        if candidate and candidate[0] in nhl_metadata:
+            return nhl_metadata[candidate[0]]
         return None
 
     # 1. PARSE ROSTERS
@@ -385,13 +367,10 @@ def fetch_espn_league_data(league_id, season_year):
                 
                 if full_name:
                     meta = find_metadata(full_name)
-                    
-                    # Store COMPLETE ready-to-use data
+                    # We store just text data now to avoid frontend logic issues
                     roster_entry = {
                         'Name': full_name,
-                        'ID': str(meta['ID']).strip() if meta else '0',
-                        'NHLTeam': str(meta['Team']).strip() if meta else 'N/A',
-                        'Headshot': f"https://assets.nhle.com/mugs/nhl/20252026/{meta['Team']}/{meta['ID']}.png" if meta else "https://assets.nhle.com/mugs/nhl/default.png"
+                        'NHLTeam': str(meta['Team']).strip() if meta else 'FA'
                     }
                     roster_data[team_name].append(roster_entry)
     except:
