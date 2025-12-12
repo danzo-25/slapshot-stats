@@ -68,25 +68,25 @@ st.markdown("""
         object-fit: cover;
     }
 
-    /* COMPACT GAME CARDS - UPDATED SIZING */
+    /* COMPACT GAME CARDS - TIGHTER CONTAINER, LARGER TEXT */
     .game-card { 
         background-color: #262730; 
         border: 1px solid #41444e; 
         border-radius: 6px; 
-        padding: 3px 4px; 
+        padding: 2px 2px; /* Very tight padding */
         text-align: center; 
-        margin: 0 auto 5px auto; 
+        margin: 0 auto 6px auto; 
         max-width: 100%; 
         box-shadow: 1px 1px 3px rgba(0,0,0,0.2); 
-        line-height: 1.2;
+        line-height: 1.1; /* Tight line height */
     }
     .team-row { 
         display: flex; 
         justify-content: center; 
         align-items: center; 
-        gap: 8px; 
-        padding-top: 3px;
-        padding-bottom: 2px;
+        gap: 6px; 
+        padding-top: 1px;
+        padding-bottom: 1px;
     }
     .team-info { 
         display: flex; 
@@ -94,40 +94,40 @@ st.markdown("""
         align-items: center; 
     }
     .team-logo { 
-        width: 26px; 
-        height: 26px; 
+        width: 28px; /* Larger logo */
+        height: 28px; 
         object-fit: contain; 
-        margin-bottom: 1px; 
+        margin-bottom: 0px; 
     }
     .team-name { 
         font-weight: 900; 
-        font-size: 0.95em; /* Increased size */
+        font-size: 1.0em; /* Larger text */
         margin: 0; 
         line-height: 1;
     }
     .vs-text { 
-        font-size: 0.85em; 
+        font-size: 0.9em; /* Larger @ */
         font-weight: bold; 
         color: #aaa; 
         margin: 0; 
     }
     .game-time { 
-        margin-top: 3px; 
+        margin-top: 2px; /* Minimal gap */
         font-weight: bold; 
         color: #FF4B4B; 
-        font-size: 0.85em; /* Increased size */
+        font-size: 0.9em; /* Larger time */
         border-top: 1px solid #41444e; 
-        padding-top: 2px;
-        padding-bottom: 2px;
+        padding-top: 1px;
+        padding-bottom: 1px;
     }
     .game-live { 
-        margin-top: 3px; 
+        margin-top: 2px; 
         font-weight: bold; 
         color: #ff4b4b; 
-        font-size: 0.9em; 
+        font-size: 0.95em; /* Slightly larger for live */
         border-top: 1px solid #41444e; 
-        padding-top: 2px;
-        padding-bottom: 2px;
+        padding-top: 1px;
+        padding-bottom: 1px;
         animation: pulse 2s infinite; 
     }
 
@@ -520,8 +520,8 @@ else:
                 trade_config = {
                     "Side": st.column_config.TextColumn("Side", pinned=True),
                     "Player": st.column_config.TextColumn("Player", pinned=True),
-                    "FP": st.column_config.NumberColumn("FP", format="%.1f", help="Current Fantasy Points"),
-                    "ROS_FP": st.column_config.NumberColumn("ROS FP", format="%.1f", help="Rest of Season Projected FP"),
+                    "FP": st.column_config.NumberColumn("FP", help="Current Fantasy Points", format="%.1f"),
+                    "ROS_FP": st.column_config.NumberColumn("ROS FP", help="Rest of Season Projected FP", format="%.1f"),
                     "G": st.column_config.NumberColumn("G", help="Current Goals"), "ROS_G": st.column_config.NumberColumn("ROS G", help="Projected Goals"),
                     "A": st.column_config.NumberColumn("A", help="Current Assists"), "ROS_A": st.column_config.NumberColumn("ROS A", help="Projected Assists"),
                     "Pts": st.column_config.NumberColumn("Pts", help="Current Points"), "ROS_Pts": st.column_config.NumberColumn("ROS Pts", help="Projected Points"),
