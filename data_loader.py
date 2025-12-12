@@ -118,7 +118,7 @@ def get_player_game_log(player_id):
         return df_log.sort_values(by='gameDate')
     except: return pd.DataFrame()
 
-# --- MODIFIED: Load Schedule (Capture ID for Link) ---
+# --- MODIFIED: Load Schedule (NOW INCLUDES ID) ---
 @st.cache_data(ttl=60)
 def load_schedule():
     est_tz = pytz.timezone('US/Eastern')
@@ -161,7 +161,7 @@ def load_schedule():
                     status_text = f"F: {away_score}-{home_score}"
 
                 processed.append({
-                    "id": g['id'], # Added ID for linking
+                    "id": g['id'], # <--- THIS IS THE FIX
                     "home": g['homeTeam']['abbrev'],
                     "home_logo": g['homeTeam'].get('logo', ''),
                     "away": g['awayTeam']['abbrev'],
@@ -363,9 +363,13 @@ def fetch_espn_league_data(league_id, season_year):
         teams_map = {}
         for t in data.get('teams', []):
             t_id = t['id']
-            name = t.get('abbrev')
-            if not name: name = t.get('nickname')
-            if not name: name = f"Team {t_id}"
+            name = t.get('name')
+            if not name:
+                loc = t.get('location', '')
+                nick = t.get('nickname', '')
+                if loc and nick: name = f"{loc} {nick}"
+                elif t.get('abbrev'): name = t.get('abbrev')
+                else: name = f"Team {t_id}"
             teams_map[t_id] = name
 
         for team in data.get('teams', []):
@@ -392,18 +396,14 @@ def fetch_espn_league_data(league_id, season_year):
     standings_list = []
     try:
         for team in data.get('teams', []):
-            abbrev = team.get('abbrev')
-            location = team.get('location', '')
-            nickname = team.get('nickname', '')
-            if location and nickname: full_name = f"{location} {nickname}"
-            elif abbrev: full_name = abbrev
-            else: full_name = f"Team {team.get('id')}"
+            t_id = team['id']
+            full_name = teams_map.get(t_id, f"Team {t_id}")
 
             record = team.get('record', {}).get('overall', {})
             wins = record.get('wins', 0)
             losses = record.get('losses', 0)
             ties = record.get('ties', 0)
-            rank = team.get('playoffSeed', team.get('rankCalculatedFinal', 0))
+            rank = team.get('playoffSeed', 0)
 
             standings_list.append({'Rank': rank, 'Team': full_name, 'W': wins, 'L': losses, 'T': ties})
         
