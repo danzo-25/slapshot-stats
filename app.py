@@ -68,38 +68,38 @@ st.markdown("""
         object-fit: cover;
     }
 
-    /* ULTRA COMPACT GAME CARDS */
+    /* COMPACT GAME CARDS - ICONS ON OUTSIDE */
     .game-card { 
         background-color: #262730; 
         border: 1px solid #41444e; 
         border-radius: 4px; 
-        padding: 0px 1px; /* Zero vertical padding */
+        padding: 0px 1px; 
         text-align: center; 
         margin: 0 auto 4px auto; 
         max-width: 100%; 
         box-shadow: 1px 1px 2px rgba(0,0,0,0.2); 
-        line-height: 1.0; /* Maximum tightness */
+        line-height: 1.0;
     }
     .team-row { 
         display: flex; 
         justify-content: center; 
         align-items: center; 
-        gap: 2px; /* Minimal horizontal gap */
-        padding-top: 0px;
-        padding-bottom: 0px;
+        gap: 8px; 
+        padding-top: 2px;
+        padding-bottom: 2px;
     }
     .team-info { 
         display: flex; 
-        flex-direction: column; 
-        align-items: center; 
+        flex-direction: row; /* CHANGED: Side-by-side layout */
+        align-items: center;
+        gap: 4px;
     }
     .team-logo { 
-        width: 24px; /* Slightly smaller logo to save vertical space */
+        width: 24px; 
         height: 24px; 
         object-fit: contain; 
-        margin-bottom: 0px; 
+        margin: 0;
     }
-    /* Font sizes remain exactly the same */
     .team-name { 
         font-weight: 900; 
         font-size: 1.0em; 
@@ -113,13 +113,13 @@ st.markdown("""
         margin: 0; 
     }
     .game-time { 
-        margin-top: 0px; /* No margin to the border line */
+        margin-top: 0px; 
         font-weight: bold; 
         color: #FF4B4B; 
         font-size: 0.9em; 
         border-top: 1px solid #41444e; 
-        padding-top: 0px;
-        padding-bottom: 0px;
+        padding-top: 1px;
+        padding-bottom: 1px;
     }
     .game-live { 
         margin-top: 0px; 
@@ -127,8 +127,8 @@ st.markdown("""
         color: #ff4b4b; 
         font-size: 0.95em; 
         border-top: 1px solid #41444e; 
-        padding-top: 0px;
-        padding-bottom: 0px;
+        padding-top: 1px;
+        padding-bottom: 1px;
         animation: pulse 2s infinite; 
     }
 
@@ -185,7 +185,6 @@ else:
 
     if league_id:
         try:
-            # UNIFIED FETCH: Rosters + Standings + League Name
             roster_data, standings_df, league_name, status = fetch_espn_league_data(league_id, 2026)
             
             if status == 'SUCCESS':
@@ -239,21 +238,27 @@ else:
             st.markdown(f"""
             <div class="game-card">
                 <div class="team-row">
-                    <div class="team-info"><img src="{game['away_logo']}" class="team-logo"><div class="team-name">{game['away']}</div></div>
+                    <div class="team-info">
+                        <img src="{game['away_logo']}" class="team-logo">
+                        <div class="team-name">{game['away']}</div>
+                    </div>
+                    
                     <div class="vs-text">@</div>
-                    <div class="team-info"><img src="{game['home_logo']}" class="team-logo"><div class="team-name">{game['home']}</div></div>
+                    
+                    <div class="team-info">
+                        <div class="team-name">{game['home']}</div>
+                        <img src="{game['home_logo']}" class="team-logo">
+                    </div>
                 </div>
                 <div class="{status_class}">{game['time']}</div>
             </div>""", unsafe_allow_html=True)
 
-        # Split Home tab into 2 main columns
         col_t, col_tm = st.columns(2)
         
         with col_t:
             st.subheader("Today's Games")
             if not games_today: st.info("No games today.")
             else:
-                # Render 2 cards per row within this column
                 for i in range(0, len(games_today), 2):
                     cols = st.columns(2)
                     for j in range(2):
