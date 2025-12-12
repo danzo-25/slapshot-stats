@@ -118,51 +118,69 @@ def get_player_game_log(player_id):
         return df_log.sort_values(by='gameDate')
     except: return pd.DataFrame()
 
+# --- MODIFIED: Load Schedule (Returns Today AND Tomorrow) ---
 @st.cache_data(ttl=60)
 def load_schedule():
     est_tz = pytz.timezone('US/Eastern')
     now_est = datetime.now(pytz.utc).astimezone(est_tz)
-    today_est_str = now_est.strftime("%Y-%m-%d")
+    
+    today_str = now_est.strftime("%Y-%m-%d")
+    tomorrow_str = (now_est + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    url = f"https://api-web.nhle.com/v1/schedule/{today_est_str}"
+    # API returns a whole week of games
+    url = f"https://api-web.nhle.com/v1/schedule/{today_str}"
     
     try:
         response = requests.get(url, timeout=5)
         response.raise_for_status()
         data = response.json()
         
-        todays_games = data.get('gameWeek', [{}])[0].get('games', [])
+        game_week = data.get('gameWeek', [])
         
-        processed_games = []
-        for g in todays_games:
-            utc_time = datetime.strptime(g['startTimeUTC'], "%Y-%m-%dT%H:%M:%SZ")
-            utc_time = utc_time.replace(tzinfo=pytz.utc)
-            est_time = utc_time.astimezone(est_tz)
-            
-            game_state = g.get('gameState', 'FUT')
-            status_text = est_time.strftime("%I:%M %p EST")
-            is_live = False
-            
-            if game_state in ['LIVE', 'CRIT']:
-                home_score = g['homeTeam'].get('score', 0)
-                away_score = g['awayTeam'].get('score', 0)
-                status_text = f"LIVE: {away_score} - {home_score}"
-                is_live = True
-            elif game_state in ['OFF', 'FINAL']:
-                home_score = g['homeTeam'].get('score', 0)
-                away_score = g['awayTeam'].get('score', 0)
-                status_text = f"Final: {away_score} - {home_score}"
+        games_today = []
+        games_tomorrow = []
+        
+        # Helper to process a list of raw games
+        def process_games(raw_games):
+            processed = []
+            for g in raw_games:
+                utc_time = datetime.strptime(g['startTimeUTC'], "%Y-%m-%dT%H:%M:%SZ")
+                utc_time = utc_time.replace(tzinfo=pytz.utc)
+                est_time = utc_time.astimezone(est_tz)
+                
+                game_state = g.get('gameState', 'FUT')
+                status_text = est_time.strftime("%I:%M %p")
+                is_live = False
+                
+                if game_state in ['LIVE', 'CRIT']:
+                    home_score = g['homeTeam'].get('score', 0)
+                    away_score = g['awayTeam'].get('score', 0)
+                    status_text = f"LIVE: {away_score}-{home_score}"
+                    is_live = True
+                elif game_state in ['OFF', 'FINAL']:
+                    home_score = g['homeTeam'].get('score', 0)
+                    away_score = g['awayTeam'].get('score', 0)
+                    status_text = f"F: {away_score}-{home_score}"
 
-            processed_games.append({
-                "home": g['homeTeam']['abbrev'],
-                "home_logo": g['homeTeam'].get('logo', ''),
-                "away": g['awayTeam']['abbrev'],
-                "away_logo": g['awayTeam'].get('logo', ''),
-                "time": status_text,
-                "is_live": is_live
-            })
-        return processed_games
-    except: return []
+                processed.append({
+                    "home": g['homeTeam']['abbrev'],
+                    "home_logo": g['homeTeam'].get('logo', ''),
+                    "away": g['awayTeam']['abbrev'],
+                    "away_logo": g['awayTeam'].get('logo', ''),
+                    "time": status_text,
+                    "is_live": is_live
+                })
+            return processed
+
+        # Locate specific days in the week structure
+        for day in game_week:
+            if day['date'] == today_str:
+                games_today = process_games(day.get('games', []))
+            elif day['date'] == tomorrow_str:
+                games_tomorrow = process_games(day.get('games', []))
+                
+        return games_today, games_tomorrow
+    except: return [], []
 
 @st.cache_data(ttl=3600)
 def load_weekly_leaders():
@@ -249,7 +267,6 @@ def load_nhl_news():
 # --- FETCH NHL STANDINGS ---
 @st.cache_data(ttl=300)
 def fetch_nhl_standings(view_type):
-    # The API endpoint is the same, we filter in the function
     url = "https://api-web.nhle.com/v1/standings/now"
     
     try:
@@ -298,20 +315,18 @@ def fetch_nhl_standings(view_type):
     except Exception as e:
         return pd.DataFrame()
 
-# --- UNIFIED ESPN LEAGUE FETCHER (Robust) ---
+
+# --- UNIFIED ESPN LEAGUE FETCHER ---
 @st.cache_data(ttl=60)
 def fetch_espn_league_data(league_id, season_year):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Accept': 'application/json',
     }
-    
-    # We try both views. Sometimes 'mRoster' needs to be separate.
-    # For a robust check, we will use a known working endpoint pattern.
-    
+    params = {'view': 'mRoster,mSettings,mTeam'}
+
     def try_fetch(year):
         url = f"https://fantasy.espn.com/apis/v3/games/fhl/seasons/{year}/segments/0/leagues/{league_id}"
-        params = {'view': ['mRoster', 'mSettings', 'mTeam']} # List format is often better for multiple views
         try:
             r = requests.get(url, params=params, headers=headers, timeout=5)
             if r.status_code == 200: return r.json(), 'SUCCESS'
@@ -351,15 +366,9 @@ def fetch_espn_league_data(league_id, season_year):
         teams_map = {}
         for t in data.get('teams', []):
             t_id = t['id']
-            # Fallback for name
-            name = t.get('name')
-            if not name:
-                # Try combining location and nickname
-                loc = t.get('location', '')
-                nick = t.get('nickname', '')
-                if loc and nick: name = f"{loc} {nick}"
-                elif t.get('abbrev'): name = t.get('abbrev')
-                else: name = f"Team {t_id}"
+            name = t.get('abbrev')
+            if not name: name = t.get('nickname')
+            if not name: name = f"Team {t_id}"
             teams_map[t_id] = name
 
         for team in data.get('teams', []):
@@ -375,7 +384,8 @@ def fetch_espn_league_data(league_id, season_year):
                     meta = find_metadata(full_name)
                     roster_entry = {
                         'Name': full_name,
-                        'NHLTeam': str(meta['Team']).strip() if meta else 'FA'
+                        'ID': str(meta['ID']).strip() if meta else '0',
+                        'NHLTeam': str(meta['Team']).strip() if meta else 'N/A'
                     }
                     roster_data[team_name].append(roster_entry)
     except:
@@ -385,15 +395,18 @@ def fetch_espn_league_data(league_id, season_year):
     standings_list = []
     try:
         for team in data.get('teams', []):
-            t_id = team['id']
-            full_name = teams_map.get(t_id, f"Team {t_id}")
+            abbrev = team.get('abbrev')
+            location = team.get('location', '')
+            nickname = team.get('nickname', '')
+            if location and nickname: full_name = f"{location} {nickname}"
+            elif abbrev: full_name = abbrev
+            else: full_name = f"Team {team.get('id')}"
 
             record = team.get('record', {}).get('overall', {})
             wins = record.get('wins', 0)
             losses = record.get('losses', 0)
             ties = record.get('ties', 0)
-            # Use 'playoffSeed' for rank, default to 0
-            rank = team.get('playoffSeed', 0)
+            rank = team.get('playoffSeed', team.get('rankCalculatedFinal', 0))
 
             standings_list.append({'Rank': rank, 'Team': full_name, 'W': wins, 'L': losses, 'T': ties})
         
