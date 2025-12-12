@@ -68,25 +68,25 @@ st.markdown("""
         object-fit: cover;
     }
 
-    /* COMPACT GAME CARDS - TIGHTER CONTAINER, LARGER TEXT */
+    /* ULTRA COMPACT GAME CARDS */
     .game-card { 
         background-color: #262730; 
         border: 1px solid #41444e; 
-        border-radius: 6px; 
-        padding: 2px 2px; /* Very tight padding */
+        border-radius: 4px; 
+        padding: 0px 1px; /* Zero vertical padding */
         text-align: center; 
-        margin: 0 auto 6px auto; 
+        margin: 0 auto 4px auto; 
         max-width: 100%; 
-        box-shadow: 1px 1px 3px rgba(0,0,0,0.2); 
-        line-height: 1.1; /* Tight line height */
+        box-shadow: 1px 1px 2px rgba(0,0,0,0.2); 
+        line-height: 1.0; /* Maximum tightness */
     }
     .team-row { 
         display: flex; 
         justify-content: center; 
         align-items: center; 
-        gap: 6px; 
-        padding-top: 1px;
-        padding-bottom: 1px;
+        gap: 2px; /* Minimal horizontal gap */
+        padding-top: 0px;
+        padding-bottom: 0px;
     }
     .team-info { 
         display: flex; 
@@ -94,40 +94,41 @@ st.markdown("""
         align-items: center; 
     }
     .team-logo { 
-        width: 28px; /* Larger logo */
-        height: 28px; 
+        width: 24px; /* Slightly smaller logo to save vertical space */
+        height: 24px; 
         object-fit: contain; 
         margin-bottom: 0px; 
     }
+    /* Font sizes remain exactly the same */
     .team-name { 
         font-weight: 900; 
-        font-size: 1.0em; /* Larger text */
+        font-size: 1.0em; 
         margin: 0; 
         line-height: 1;
     }
     .vs-text { 
-        font-size: 0.9em; /* Larger @ */
+        font-size: 0.9em; 
         font-weight: bold; 
         color: #aaa; 
         margin: 0; 
     }
     .game-time { 
-        margin-top: 2px; /* Minimal gap */
+        margin-top: 0px; /* No margin to the border line */
         font-weight: bold; 
         color: #FF4B4B; 
-        font-size: 0.9em; /* Larger time */
+        font-size: 0.9em; 
         border-top: 1px solid #41444e; 
-        padding-top: 1px;
-        padding-bottom: 1px;
+        padding-top: 0px;
+        padding-bottom: 0px;
     }
     .game-live { 
-        margin-top: 2px; 
+        margin-top: 0px; 
         font-weight: bold; 
         color: #ff4b4b; 
-        font-size: 0.95em; /* Slightly larger for live */
+        font-size: 0.95em; 
         border-top: 1px solid #41444e; 
-        padding-top: 1px;
-        padding-bottom: 1px;
+        padding-top: 0px;
+        padding-bottom: 0px;
         animation: pulse 2s infinite; 
     }
 
