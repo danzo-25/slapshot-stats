@@ -82,7 +82,7 @@ st.markdown("""
         padding: 0px 1px; 
         text-align: center; 
         margin: 0 auto 0 auto; 
-        max-width: 95%; /* Narrower to fit 3 columns */
+        max-width: 95%; 
         box-shadow: 1px 1px 2px rgba(0,0,0,0.2); 
         line-height: 1.0; 
     }
@@ -241,7 +241,6 @@ else:
 
     # ================= TAB 1: HOME =================
     with tab_home:
-        # Load 3 days
         games_yesterday, games_today, games_tomorrow = load_schedule()
         
         # News
@@ -263,7 +262,7 @@ else:
                         """, unsafe_allow_html=True)
         st.divider()
 
-        # GAMES (3 COLUMNS)
+        # Games (Horizontal Banner Layout)
         def render_game_card_with_button(game):
             status_class = "game-live" if game.get("is_live") else "game-time"
             st.markdown(f"""
@@ -280,22 +279,20 @@ else:
                 set_game_id(game['id'])
                 st.rerun()
 
-        c_yest, c_today, c_tom = st.columns(3)
-        
-        with c_yest:
-            st.subheader("Yesterday")
-            if not games_yesterday: st.info("No games.")
+        # Display Yesterday, Today, Tomorrow in columns
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("##### Yesterday")
+            if not games_yesterday: st.info("-")
             else:
                 for g in games_yesterday: render_game_card_with_button(g)
-
-        with c_today:
-            st.subheader("Today")
+        with c2:
+            st.markdown("##### Today")
             if not games_today: st.info("No games.")
             else:
                 for g in games_today: render_game_card_with_button(g)
-
-        with c_tom:
-            st.subheader("Tomorrow")
+        with c3:
+            st.markdown("##### Tomorrow")
             if not games_tomorrow: st.info("No games.")
             else:
                 for g in games_tomorrow: render_game_card_with_button(g)
@@ -350,7 +347,7 @@ else:
                 st.line_chart(chart_data, color=["#d3d3d3", "#ff4b4b"])
         st.divider()
         st.subheader("League Summary")
-        filt_df = df.copy() # (Simplified for brevity, same logic as before)
+        filt_df = df.copy() 
         st.dataframe(filt_df, use_container_width=True, hide_index=True, height=600)
 
     with tab_tools:
@@ -392,27 +389,25 @@ else:
             g_id = st.session_state.selected_game_id
             st.header("🥅 Game Center")
             
-            landing_data = fetch_nhl_boxscore(g_id)
+            box_data = fetch_nhl_boxscore(g_id)
             
-            if landing_data:
-                home = landing_data.get('homeTeam', {})
-                away = landing_data.get('awayTeam', {})
+            if box_data:
+                # 1. SCOREBOARD
+                home = box_data.get('homeTeam', {})
+                away = box_data.get('awayTeam', {})
                 
-                # --- HEADER: TEAMS & ICONS ---
                 c1, c2, c3 = st.columns([1, 0.2, 1])
-                with c1:
-                    st.markdown(f"<div style='text-align:center'><img src='{away.get('logo', '')}' width='80'><h2>{away.get('name', {}).get('default', 'Away')}</h2></div>", unsafe_allow_html=True)
-                with c2:
-                    st.markdown("<h2 style='text-align:center; padding-top:40px'>VS</h2>", unsafe_allow_html=True)
-                with c3:
-                    st.markdown(f"<div style='text-align:center'><img src='{home.get('logo', '')}' width='80'><h2>{home.get('name', {}).get('default', 'Home')}</h2></div>", unsafe_allow_html=True)
+                with c1: 
+                    st.markdown(f"<div style='text-align:center'><img src='{away.get('logo', '')}' width='80'><h2>{away.get('name', {}).get('default', 'Away')}</h2><h3>{away.get('score', 0)}</h3></div>", unsafe_allow_html=True)
+                with c2: st.markdown("<h2 style='text-align:center; padding-top:40px'>VS</h2>", unsafe_allow_html=True)
+                with c3: 
+                    st.markdown(f"<div style='text-align:center'><img src='{home.get('logo', '')}' width='80'><h2>{home.get('name', {}).get('default', 'Home')}</h2><h3>{home.get('score', 0)}</h3></div>", unsafe_allow_html=True)
                 
                 st.divider()
                 
-                # --- SEASON STATS COMPARISON (PREGAME VIEW) ---
+                # --- SEASON STATS COMPARISON ---
                 st.subheader("Season Stats Comparison (Avg per Game)")
                 
-                # Calculate aggregated stats from main DF for these two teams
                 away_abbr = away.get('abbrev')
                 home_abbr = home.get('abbrev')
                 
@@ -421,7 +416,7 @@ else:
                         tdf = df[df['Team'] == abbr]
                         if not tdf.empty:
                             return {
-                                'GF/G': round(tdf['G'].sum() / 82, 2), # Projected/Paced
+                                'GF/G': round(tdf['G'].sum() / 82, 2),
                                 'PP%': round(tdf['PPP'].sum() / tdf['Pts'].sum() * 100, 1) if tdf['Pts'].sum() > 0 else 0,
                                 'Shots/G': round(tdf['SOG'].sum() / 82, 1),
                                 'Hits/G': round(tdf['Hits'].sum() / 82, 1)
@@ -430,45 +425,37 @@ else:
 
                 s_away = get_team_avg(away_abbr)
                 s_home = get_team_avg(home_abbr)
-                
                 comp_df = pd.DataFrame([s_away, s_home], index=[away_abbr, home_abbr])
                 st.dataframe(comp_df, use_container_width=True)
 
                 st.divider()
 
-                # --- BOX SCORE TABLES (SAFE) ---
+                # --- BOX SCORE (Robust Parser for Boxscore Endpoint) ---
                 st.subheader("Box Score")
                 
-                # Helper to parse stats safely even if empty
                 def parse_stats(team_data):
                     rows = []
-                    # boxscore entries are usually in 'boxscore' -> 'playerByGameStats'
-                    # In 'landing' endpoint, it's often directly in 'boxscore'
-                    # We check multiple paths
+                    # Check for playerByGameStats (Boxscore endpoint structure)
+                    if 'playerByGameStats' in box_data:
+                        stats_key = 'awayTeam' if team_data == away else 'homeTeam'
+                        p_stats = box_data['playerByGameStats'].get(stats_key, {})
+                        
+                        players = p_stats.get('forwards', []) + p_stats.get('defense', [])
+                        for p in players:
+                            rows.append({
+                                "Player": p.get('name', {}).get('default'),
+                                "G": p.get('goals', 0),
+                                "A": p.get('assists', 0),
+                                "Pts": p.get('points', 0),
+                                "SOG": p.get('shots', 0),
+                                "TOI": p.get('toi', '00:00')
+                            })
                     
-                    players = []
-                    if 'boxscore' in landing_data:
-                        box = landing_data['boxscore']
-                        p_stats = box.get('playerByGameStats', {})
-                        t_stats = p_stats.get('awayTeam' if team_data == away else 'homeTeam', {})
-                        players = t_stats.get('forwards', []) + t_stats.get('defense', [])
-                    
-                    if not players:
-                        # Return empty structured DF if no stats
-                        return pd.DataFrame(columns=["Player", "G", "A", "Pts", "SOG", "TOI"])
-
-                    for p in players:
-                        rows.append({
-                            "Player": p.get('name', {}).get('default'),
-                            "G": p.get('goals', 0),
-                            "A": p.get('assists', 0),
-                            "Pts": p.get('points', 0),
-                            "SOG": p.get('shots', 0),
-                            "TOI": p.get('toi', '00:00')
-                        })
+                    if not rows:
+                         return pd.DataFrame(columns=["Player", "G", "A", "Pts", "SOG", "TOI"])
+                         
                     return pd.DataFrame(rows)
 
-                # Attempt to parse (will return empty table structure if game hasn't started)
                 away_stats = parse_stats(away)
                 home_stats = parse_stats(home)
                 
@@ -481,6 +468,6 @@ else:
                     st.dataframe(home_stats, hide_index=True, use_container_width=True)
                 
             else:
-                st.error("Could not load game data.")
+                st.error("Could not load box score.")
         else:
             st.info("👈 Select a game from the **Home** tab to view details here.")
