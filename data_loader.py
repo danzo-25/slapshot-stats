@@ -118,7 +118,7 @@ def get_player_game_log(player_id):
         return df_log.sort_values(by='gameDate')
     except: return pd.DataFrame()
 
-# --- MODIFIED: Load Schedule (Returns Today AND Tomorrow) ---
+# --- MODIFIED: Load Schedule (Capture ID for Link) ---
 @st.cache_data(ttl=60)
 def load_schedule():
     est_tz = pytz.timezone('US/Eastern')
@@ -127,7 +127,6 @@ def load_schedule():
     today_str = now_est.strftime("%Y-%m-%d")
     tomorrow_str = (now_est + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # API returns a whole week of games
     url = f"https://api-web.nhle.com/v1/schedule/{today_str}"
     
     try:
@@ -140,7 +139,6 @@ def load_schedule():
         games_today = []
         games_tomorrow = []
         
-        # Helper to process a list of raw games
         def process_games(raw_games):
             processed = []
             for g in raw_games:
@@ -163,6 +161,7 @@ def load_schedule():
                     status_text = f"F: {away_score}-{home_score}"
 
                 processed.append({
+                    "id": g['id'], # Added ID for linking
                     "home": g['homeTeam']['abbrev'],
                     "home_logo": g['homeTeam'].get('logo', ''),
                     "away": g['awayTeam']['abbrev'],
@@ -172,7 +171,6 @@ def load_schedule():
                 })
             return processed
 
-        # Locate specific days in the week structure
         for day in game_week:
             if day['date'] == today_str:
                 games_today = process_games(day.get('games', []))
@@ -314,7 +312,6 @@ def fetch_nhl_standings(view_type):
         
     except Exception as e:
         return pd.DataFrame()
-
 
 # --- UNIFIED ESPN LEAGUE FETCHER ---
 @st.cache_data(ttl=60)
