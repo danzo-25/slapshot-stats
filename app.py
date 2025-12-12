@@ -37,38 +37,7 @@ def remove_player(player, side):
 # --- CSS ---
 st.markdown("""
 <style>
-    /* Tab 5 Grid */
-    .league-grid-container {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 20px;
-        margin-top: 20px;
-    }
-    .team-roster-box {
-        padding: 15px;
-        border: 1px solid #333;
-        border-radius: 8px;
-        background-color: #1e1e1e;
-        min-height: 400px;
-    }
-    .roster-player-item {
-        display: flex;
-        align-items: center;
-        margin-bottom: 5px;
-        padding: 5px;
-        background-color: #262730;
-        border-radius: 4px;
-        font-size: 0.9em;
-    }
-    .player-headshot {
-        width: 30px;
-        height: 30px;
-        border-radius: 50%;
-        margin-right: 10px;
-        object-fit: cover;
-    }
-
-    /* COMPACT GAME CARDS - ICONS ON OUTSIDE */
+    /* COMPACT GAME CARDS */
     .game-card { 
         background-color: #262730; 
         border: 1px solid #41444e; 
@@ -78,21 +47,21 @@ st.markdown("""
         margin: 0 auto 4px auto; 
         max-width: 100%; 
         box-shadow: 1px 1px 2px rgba(0,0,0,0.2); 
-        line-height: 1.0;
+        line-height: 1.0; 
     }
     .team-row { 
         display: flex; 
         justify-content: center; 
         align-items: center; 
-        gap: 8px; 
-        padding-top: 2px;
-        padding-bottom: 2px;
+        gap: 2px; 
+        padding-top: 0px;
+        padding-bottom: 0px;
     }
     .team-info { 
         display: flex; 
-        flex-direction: row; /* CHANGED: Side-by-side layout */
+        flex-direction: row; 
         align-items: center;
-        gap: 4px;
+        gap: 2px;
     }
     .team-logo { 
         width: 24px; 
@@ -118,8 +87,8 @@ st.markdown("""
         color: #FF4B4B; 
         font-size: 0.9em; 
         border-top: 1px solid #41444e; 
-        padding-top: 1px;
-        padding-bottom: 1px;
+        padding-top: 0px;
+        padding-bottom: 0px;
     }
     .game-live { 
         margin-top: 0px; 
@@ -127,8 +96,8 @@ st.markdown("""
         color: #ff4b4b; 
         font-size: 0.95em; 
         border-top: 1px solid #41444e; 
-        padding-top: 1px;
-        padding-bottom: 1px;
+        padding-top: 0px;
+        padding-bottom: 0px;
         animation: pulse 2s infinite; 
     }
 
@@ -185,6 +154,7 @@ else:
 
     if league_id:
         try:
+            # UNIFIED FETCH
             roster_data, standings_df, league_name, status = fetch_espn_league_data(league_id, 2026)
             
             if status == 'SUCCESS':
@@ -229,12 +199,11 @@ else:
 
     # ================= TAB 1: HOME =================
     with tab_home:
-        # Fetch BOTH schedules
         games_today, games_tomorrow = load_schedule()
         
-        # Helper to render a card
         def render_game_card(game):
             status_class = "game-live" if game.get("is_live") else "game-time"
+            # Render using st.markdown with minimal whitespace
             st.markdown(f"""
             <div class="game-card">
                 <div class="team-row">
@@ -242,9 +211,7 @@ else:
                         <img src="{game['away_logo']}" class="team-logo">
                         <div class="team-name">{game['away']}</div>
                     </div>
-                    
                     <div class="vs-text">@</div>
-                    
                     <div class="team-info">
                         <div class="team-name">{game['home']}</div>
                         <img src="{game['home_logo']}" class="team-logo">
@@ -256,7 +223,7 @@ else:
         col_t, col_tm = st.columns(2)
         
         with col_t:
-            st.subheader("Today's Games")
+            st.subheader("Today")
             if not games_today: st.info("No games today.")
             else:
                 for i in range(0, len(games_today), 2):
@@ -266,7 +233,7 @@ else:
                             with cols[j]: render_game_card(games_today[i+j])
 
         with col_tm:
-            st.subheader("Tomorrow's Games")
+            st.subheader("Tomorrow")
             if not games_tomorrow: st.info("No games tomorrow.")
             else:
                 for i in range(0, len(games_tomorrow), 2):
