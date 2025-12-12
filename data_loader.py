@@ -118,18 +118,19 @@ def get_player_game_log(player_id):
         return df_log.sort_values(by='gameDate')
     except: return pd.DataFrame()
 
-# --- MODIFIED: Load Schedule (Yest, Today, Tomorrow) ---
+# --- MODIFIED: Load Schedule (Requests from Yesterday) ---
 @st.cache_data(ttl=60)
 def load_schedule():
     est_tz = pytz.timezone('US/Eastern')
     now_est = datetime.now(pytz.utc).astimezone(est_tz)
     
+    # Calculate key dates
     today_str = now_est.strftime("%Y-%m-%d")
     tomorrow_str = (now_est + timedelta(days=1)).strftime("%Y-%m-%d")
     yesterday_str = (now_est - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # API returns a rolling week, so just querying today usually gives surrounding days
-    url = f"https://api-web.nhle.com/v1/schedule/{today_str}"
+    # FIX: Request schedule starting from YESTERDAY to ensure it's included
+    url = f"https://api-web.nhle.com/v1/schedule/{yesterday_str}"
     
     try:
         response = requests.get(url, timeout=5)
@@ -414,7 +415,7 @@ def fetch_espn_league_data(league_id, season_year):
 
     return roster_data, df_standings, league_name, 'SUCCESS'
 
-# --- NEW: FETCH BOX SCORE & LANDING (Robust) ---
+# --- FETCH BOX SCORE & LANDING ---
 @st.cache_data(ttl=60)
 def fetch_nhl_boxscore(game_id):
     """
