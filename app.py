@@ -37,7 +37,38 @@ def remove_player(player, side):
 # --- CSS ---
 st.markdown("""
 <style>
-    /* COMPACT GAME CARDS */
+    /* Tab 5 Grid */
+    .league-grid-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 20px;
+        margin-top: 20px;
+    }
+    .team-roster-box {
+        padding: 15px;
+        border: 1px solid #333;
+        border-radius: 8px;
+        background-color: #1e1e1e;
+        min-height: 400px;
+    }
+    .roster-player-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 5px;
+        padding: 5px;
+        background-color: #262730;
+        border-radius: 4px;
+        font-size: 0.9em;
+    }
+    .player-headshot {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        margin-right: 10px;
+        object-fit: cover;
+    }
+
+    /* ULTRA COMPACT GAME CARDS */
     .game-card { 
         background-color: #262730; 
         border: 1px solid #41444e; 
@@ -101,15 +132,47 @@ st.markdown("""
         animation: pulse 2s infinite; 
     }
 
-    /* NEWS STYLING */
-    .news-container { background-color: #1e1e1e; border-radius: 12px; padding: 15px; border: 1px solid #333; }
-    .news-card { display: flex; background-color: #262730; border: 1px solid #3a3b42; margin-bottom: 12px; border-radius: 8px; overflow: hidden; transition: transform 0.2s; }
-    .news-card:hover { transform: translateY(-2px); border-color: #555; }
-    .news-img { width: 110px; height: auto; object-fit: cover; flex-shrink: 0; border-right: 1px solid #3a3b42; }
-    .news-content { padding: 10px; display: flex; flex-direction: column; justify-content: center; }
-    .news-title { font-weight: bold; font-size: 0.95em; color: #fff; text-decoration: none; margin-bottom: 4px; line-height: 1.3; }
-    .news-title:hover { color: #4da6ff; }
-    .news-desc { font-size: 0.85em; color: #aaa; margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    /* NEWS STYLING (Vertical Cards for Grid) */
+    .news-card-v { 
+        background-color: #262730; 
+        border: 1px solid #3a3b42; 
+        border-radius: 8px; 
+        overflow: hidden; 
+        height: 100%; 
+        display: flex; 
+        flex-direction: column;
+        transition: transform 0.2s;
+    }
+    .news-card-v:hover { transform: translateY(-3px); border-color: #555; }
+    .news-img-v { 
+        width: 100%; 
+        height: 140px; 
+        object-fit: cover; 
+        border-bottom: 1px solid #3a3b42;
+    }
+    .news-content-v { 
+        padding: 10px; 
+        flex-grow: 1; 
+        display: flex; 
+        flex-direction: column; 
+    }
+    .news-title-v { 
+        font-weight: bold; 
+        font-size: 0.9em; 
+        color: #fff; 
+        text-decoration: none; 
+        line-height: 1.3; 
+        margin-bottom: 5px;
+    }
+    .news-title-v:hover { color: #4da6ff; }
+    .news-desc-v { 
+        font-size: 0.8em; 
+        color: #aaa; 
+        display: -webkit-box; 
+        -webkit-line-clamp: 3; 
+        -webkit-box-orient: vertical; 
+        overflow: hidden; 
+    }
 
     /* TRADE STYLES */
     .trade-win { background-color: rgba(76, 175, 80, 0.15); border: 2px solid #4caf50; padding: 15px; border-radius: 8px; text-align: center; }
@@ -154,7 +217,6 @@ else:
 
     if league_id:
         try:
-            # UNIFIED FETCH
             roster_data, standings_df, league_name, status = fetch_espn_league_data(league_id, 2026)
             
             if status == 'SUCCESS':
@@ -199,11 +261,32 @@ else:
 
     # ================= TAB 1: HOME =================
     with tab_home:
+        # --- 1. HORIZONTAL NEWS SECTION ---
+        news = load_nhl_news()
+        if news:
+            with st.container(border=True):
+                # Display top 4 articles horizontally
+                cols = st.columns(4)
+                for i, article in enumerate(news[:4]):
+                    with cols[i]:
+                        img_html = f'<img src="{article["image"]}" class="news-img-v">' if article['image'] else ''
+                        st.markdown(f"""
+                        <div class="news-card-v">
+                            {img_html}
+                            <div class="news-content-v">
+                                <a href="{article['link']}" target="_blank" class="news-title-v">{article['headline']}</a>
+                                <div class="news-desc-v">{article['description']}</div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+        
+        st.divider()
+
+        # --- 2. GAMES SECTION ---
         games_today, games_tomorrow = load_schedule()
         
         def render_game_card(game):
             status_class = "game-live" if game.get("is_live") else "game-time"
-            # Render using st.markdown with minimal whitespace
             st.markdown(f"""
             <div class="game-card">
                 <div class="team-row">
@@ -243,7 +326,9 @@ else:
                             with cols[j]: render_game_card(games_tomorrow[i+j])
 
         st.divider()
-        col_sos, col_news = st.columns([3, 2])
+        
+        # --- 3. SOS & STATS ---
+        col_sos, col_weekly = st.columns([3, 2])
         with col_sos:
             st.header("💪 Strength of Schedule")
             with st.spinner("Calculating..."):
@@ -286,34 +371,22 @@ else:
                 st.dataframe(styled_sos, use_container_width=True, height=500, column_config=column_config, hide_index=True)
             else: st.info("SOS data unavailable.")
 
-        with col_news:
-            st.header("📰 Latest Headlines")
-            with st.container(border=True):
-                news = load_nhl_news()
-                if news:
-                    for article in news:
-                        img_html = f'<img src="{article["image"]}" class="news-img">' if article['image'] else ''
-                        st.markdown(f"""<div class="news-card">{img_html}<div class="news-content"><a href="{article['link']}" target="_blank" class="news-title">{article['headline']}</a><p class="news-desc">{article['description']}</p></div></div>""", unsafe_allow_html=True)
-                else: st.info("No news.")
-            st.markdown("#### More Trusted Sources")
-            st.markdown("""<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;"><a href="https://www.tsn.ca/nhl" target="_blank" class="link-btn">TSN Hockey</a><a href="https://www.sportsnet.ca/nhl/" target="_blank" class="link-btn">Sportsnet</a><a href="https://www.dailyfaceoff.com/" target="_blank" class="link-btn">Daily Faceoff</a><a href="https://theathletic.com/nhl/" target="_blank" class="link-btn">The Athletic</a></div>""", unsafe_allow_html=True)
-        
-        st.divider()
-        st.header("🔥 Hot This Week (Last 7 Days)")
-        with st.spinner("Loading weekly trends..."):
-            df_weekly = load_weekly_leaders()
-        if not df_weekly.empty:
-            def make_mini_chart(data, x_col, y_col, color, title):
-                sorted_data = data.sort_values(y_col, ascending=False).head(5)
-                chart = alt.Chart(sorted_data).mark_bar(cornerRadiusEnd=4).encode(x=alt.X(f'{y_col}:Q', title=None), y=alt.Y(f'{x_col}:N', sort='-x', title=None), color=alt.value(color), tooltip=[x_col, y_col]).properties(title=title, height=200)
-                text = chart.mark_text(align='left', dx=2).encode(text=f'{y_col}:Q')
-                return (chart + text)
-            c1, c2 = st.columns(2)
-            with c1: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
-            with c2: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
-            c3, c4 = st.columns(2)
-            with c3: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
-            with c4: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
+        with col_weekly:
+            st.header("🔥 Hot This Week (Last 7 Days)")
+            with st.spinner("Loading weekly trends..."):
+                df_weekly = load_weekly_leaders()
+            if not df_weekly.empty:
+                def make_mini_chart(data, x_col, y_col, color, title):
+                    sorted_data = data.sort_values(y_col, ascending=False).head(5)
+                    chart = alt.Chart(sorted_data).mark_bar(cornerRadiusEnd=4).encode(x=alt.X(f'{y_col}:Q', title=None), y=alt.Y(f'{x_col}:N', sort='-x', title=None), color=alt.value(color), tooltip=[x_col, y_col]).properties(title=title, height=200)
+                    text = chart.mark_text(align='left', dx=2).encode(text=f'{y_col}:Q')
+                    return (chart + text)
+                c1, c2 = st.columns(2)
+                with c1: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
+                with c2: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
+                c3, c4 = st.columns(2)
+                with c3: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
+                with c4: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
 
     # ================= TAB 2: ANALYTICS (League Summary) =================
     with tab_analytics:
