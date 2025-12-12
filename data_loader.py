@@ -118,6 +118,7 @@ def get_player_game_log(player_id):
         return df_log.sort_values(by='gameDate')
     except: return pd.DataFrame()
 
+# --- LOAD SCHEDULE ---
 @st.cache_data(ttl=60)
 def load_schedule():
     est_tz = pytz.timezone('US/Eastern')
@@ -128,7 +129,7 @@ def load_schedule():
     tomorrow_str = (now_est + timedelta(days=1)).strftime("%Y-%m-%d")
     yesterday_str = (now_est - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Asking for yesterday gives us the window we need
+    # Requesting yesterday gives the rolling window
     url = f"https://api-web.nhle.com/v1/schedule/{yesterday_str}"
     
     try:
@@ -153,24 +154,29 @@ def load_schedule():
                 status_text = est_time.strftime("%I:%M %p")
                 is_live = False
                 
+                home_score = g['homeTeam'].get('score', 0)
+                away_score = g['awayTeam'].get('score', 0)
+
                 if game_state in ['LIVE', 'CRIT']:
-                    home_score = g['homeTeam'].get('score', 0)
-                    away_score = g['awayTeam'].get('score', 0)
-                    status_text = f"LIVE: {away_score}-{home_score}"
+                    status_text = f"LIVE"
                     is_live = True
                 elif game_state in ['OFF', 'FINAL']:
-                    home_score = g['homeTeam'].get('score', 0)
-                    away_score = g['awayTeam'].get('score', 0)
-                    status_text = f"F: {away_score}-{home_score}"
+                    status_text = "Final"
+                elif game_state == 'FUT':
+                    home_score = "" # Don't show 0 for future games
+                    away_score = ""
 
                 processed.append({
                     "id": g['id'],
                     "home": g['homeTeam']['abbrev'],
                     "home_logo": g['homeTeam'].get('logo', ''),
+                    "home_score": home_score,
                     "away": g['awayTeam']['abbrev'],
                     "away_logo": g['awayTeam'].get('logo', ''),
+                    "away_score": away_score,
                     "time": status_text,
-                    "is_live": is_live
+                    "is_live": is_live,
+                    "game_state": game_state # For sorting
                 })
             return processed
 
@@ -414,7 +420,7 @@ def fetch_espn_league_data(league_id, season_year):
 
     return roster_data, df_standings, league_name, 'SUCCESS'
 
-# --- NEW: FETCH BOX SCORE & LANDING (Boxscore Endpoint First) ---
+# --- NEW: FETCH BOX SCORE ---
 @st.cache_data(ttl=60)
 def fetch_nhl_boxscore(game_id):
     """
