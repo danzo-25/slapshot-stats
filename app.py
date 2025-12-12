@@ -68,7 +68,7 @@ st.markdown("""
         object-fit: cover;
     }
 
-    /* ULTRA COMPACT GAME CARDS */
+    /* COMPACT GAME CARDS */
     .game-card { 
         background-color: #262730; 
         border: 1px solid #41444e; 
@@ -132,11 +132,13 @@ st.markdown("""
         animation: pulse 2s infinite; 
     }
 
-    /* NEWS STYLING (Vertical Cards for Grid) */
+    /* UPDATED NEWS STYLING (Shorter, Zoomed Images) */
+    .news-container { background-color: #1e1e1e; border-radius: 8px; padding: 10px; border: 1px solid #333; }
+    
     .news-card-v { 
         background-color: #262730; 
         border: 1px solid #3a3b42; 
-        border-radius: 8px; 
+        border-radius: 6px; 
         overflow: hidden; 
         height: 100%; 
         display: flex; 
@@ -144,34 +146,44 @@ st.markdown("""
         transition: transform 0.2s;
     }
     .news-card-v:hover { transform: translateY(-3px); border-color: #555; }
+    
     .news-img-v { 
         width: 100%; 
-        height: 140px; 
-        object-fit: cover; 
+        height: 110px; /* Reduced height */
+        object-fit: cover; /* Ensures image fills container (zooms in) */
+        object-position: center; /* Centers the crop */
         border-bottom: 1px solid #3a3b42;
     }
+    
     .news-content-v { 
-        padding: 10px; 
+        padding: 8px; /* Reduced padding */
         flex-grow: 1; 
         display: flex; 
         flex-direction: column; 
     }
+    
     .news-title-v { 
         font-weight: bold; 
-        font-size: 0.9em; 
+        font-size: 0.85em; 
         color: #fff; 
         text-decoration: none; 
-        line-height: 1.3; 
-        margin-bottom: 5px;
+        line-height: 1.2; 
+        margin-bottom: 4px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2; /* Limit title lines */
+        -webkit-box-orient: vertical;
+        overflow: hidden;
     }
     .news-title-v:hover { color: #4da6ff; }
+    
     .news-desc-v { 
-        font-size: 0.8em; 
+        font-size: 0.75em; 
         color: #aaa; 
         display: -webkit-box; 
-        -webkit-line-clamp: 3; 
+        -webkit-line-clamp: 2; /* Reduced to 2 lines */
         -webkit-box-orient: vertical; 
         overflow: hidden; 
+        margin-bottom: 0;
     }
 
     /* TRADE STYLES */
@@ -217,6 +229,7 @@ else:
 
     if league_id:
         try:
+            # UNIFIED FETCH: Rosters + Standings + League Name
             roster_data, standings_df, league_name, status = fetch_espn_league_data(league_id, 2026)
             
             if status == 'SUCCESS':
@@ -326,9 +339,7 @@ else:
                             with cols[j]: render_game_card(games_tomorrow[i+j])
 
         st.divider()
-        
-        # --- 3. SOS & STATS ---
-        col_sos, col_weekly = st.columns([3, 2])
+        col_sos, col_news = st.columns([3, 2])
         with col_sos:
             st.header("💪 Strength of Schedule")
             with st.spinner("Calculating..."):
@@ -371,7 +382,7 @@ else:
                 st.dataframe(styled_sos, use_container_width=True, height=500, column_config=column_config, hide_index=True)
             else: st.info("SOS data unavailable.")
 
-        with col_weekly:
+        with col_news:
             st.header("🔥 Hot This Week (Last 7 Days)")
             with st.spinner("Loading weekly trends..."):
                 df_weekly = load_weekly_leaders()
@@ -381,12 +392,8 @@ else:
                     chart = alt.Chart(sorted_data).mark_bar(cornerRadiusEnd=4).encode(x=alt.X(f'{y_col}:Q', title=None), y=alt.Y(f'{x_col}:N', sort='-x', title=None), color=alt.value(color), tooltip=[x_col, y_col]).properties(title=title, height=200)
                     text = chart.mark_text(align='left', dx=2).encode(text=f'{y_col}:Q')
                     return (chart + text)
-                c1, c2 = st.columns(2)
-                with c1: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
-                with c2: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
-                c3, c4 = st.columns(2)
-                with c3: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'SOG', '#ffa600', 'Most Shots on Goal'), use_container_width=True)
-                with c4: st.altair_chart(make_mini_chart(df_weekly, 'Player', 'PPP', '#58508d', 'Power Play Points'), use_container_width=True)
+                st.altair_chart(make_mini_chart(df_weekly, 'Player', 'G', '#ff4b4b', 'Top Goal Scorers'), use_container_width=True)
+                st.altair_chart(make_mini_chart(df_weekly, 'Player', 'Pts', '#0083b8', 'Top Points Leaders'), use_container_width=True)
 
     # ================= TAB 2: ANALYTICS (League Summary) =================
     with tab_analytics:
