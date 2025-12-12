@@ -79,7 +79,15 @@ st.markdown("""
         max-width: 100%; 
         box-shadow: 1px 1px 2px rgba(0,0,0,0.2); 
         line-height: 1.0; 
+        transition: transform 0.1s ease-in-out;
     }
+    /* Add Hover Effect to indicate Clickability */
+    .game-card:hover {
+        transform: scale(1.02);
+        border-color: #777;
+        cursor: pointer;
+    }
+
     .team-row { 
         display: flex; 
         justify-content: center; 
@@ -105,6 +113,7 @@ st.markdown("""
         font-size: 1.0em; 
         margin: 0; 
         line-height: 1;
+        color: #fff;
     }
     .vs-text { 
         font-size: 0.9em; 
@@ -149,12 +158,12 @@ st.markdown("""
     
     .news-img-v { 
         width: 100%; 
-        display: block; /* Removes inline spacing gaps */
-        height: 120px; /* Slightly taller to ensure coverage */
+        display: block; 
+        height: 120px; 
         object-fit: cover; 
         object-position: center; 
-        margin: 0; /* Force no margin */
-        padding: 0; /* Force no padding */
+        margin: 0; 
+        padding: 0; 
         border-bottom: 1px solid #3a3b42;
     }
     
@@ -232,7 +241,6 @@ else:
 
     if league_id:
         try:
-            # UNIFIED FETCH: Rosters + Standings + League Name
             roster_data, standings_df, league_name, status = fetch_espn_league_data(league_id, 2026)
             
             if status == 'SUCCESS':
@@ -277,47 +285,32 @@ else:
 
     # ================= TAB 1: HOME =================
     with tab_home:
-        # --- 1. HORIZONTAL NEWS SECTION ---
-        news = load_nhl_news()
-        if news:
-            with st.container(border=True):
-                # Display top 4 articles horizontally
-                cols = st.columns(4)
-                for i, article in enumerate(news[:4]):
-                    with cols[i]:
-                        img_html = f'<img src="{article["image"]}" class="news-img-v">' if article['image'] else ''
-                        st.markdown(f"""
-                        <div class="news-card-v">
-                            {img_html}
-                            <div class="news-content-v">
-                                <a href="{article['link']}" target="_blank" class="news-title-v">{article['headline']}</a>
-                                <div class="news-desc-v">{article['description']}</div>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-        
-        st.divider()
-
-        # --- 2. GAMES SECTION ---
+        # Fetch BOTH schedules
         games_today, games_tomorrow = load_schedule()
         
+        # Helper to render a card
         def render_game_card(game):
             status_class = "game-live" if game.get("is_live") else "game-time"
+            game_url = f"https://www.nhl.com/gamecenter/{game['id']}"
+            
+            # Wrap the entire card in an <a> tag
             st.markdown(f"""
-            <div class="game-card">
-                <div class="team-row">
-                    <div class="team-info">
-                        <img src="{game['away_logo']}" class="team-logo">
-                        <div class="team-name">{game['away']}</div>
+            <a href="{game_url}" target="_blank" style="text-decoration:none; color:inherit;">
+                <div class="game-card">
+                    <div class="team-row">
+                        <div class="team-info">
+                            <img src="{game['away_logo']}" class="team-logo">
+                            <div class="team-name">{game['away']}</div>
+                        </div>
+                        <div class="vs-text">@</div>
+                        <div class="team-info">
+                            <div class="team-name">{game['home']}</div>
+                            <img src="{game['home_logo']}" class="team-logo">
+                        </div>
                     </div>
-                    <div class="vs-text">@</div>
-                    <div class="team-info">
-                        <div class="team-name">{game['home']}</div>
-                        <img src="{game['home_logo']}" class="team-logo">
-                    </div>
+                    <div class="{status_class}">{game['time']}</div>
                 </div>
-                <div class="{status_class}">{game['time']}</div>
-            </div>""", unsafe_allow_html=True)
+            </a>""", unsafe_allow_html=True)
 
         col_t, col_tm = st.columns(2)
         
