@@ -118,18 +118,17 @@ def get_player_game_log(player_id):
         return df_log.sort_values(by='gameDate')
     except: return pd.DataFrame()
 
-# --- MODIFIED: Load Schedule (Requests from Yesterday) ---
 @st.cache_data(ttl=60)
 def load_schedule():
     est_tz = pytz.timezone('US/Eastern')
     now_est = datetime.now(pytz.utc).astimezone(est_tz)
     
-    # Calculate key dates
+    # Get 3 days: Yesterday, Today, Tomorrow
     today_str = now_est.strftime("%Y-%m-%d")
     tomorrow_str = (now_est + timedelta(days=1)).strftime("%Y-%m-%d")
     yesterday_str = (now_est - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # FIX: Request schedule starting from YESTERDAY to ensure it's included
+    # Asking for yesterday gives us the window we need
     url = f"https://api-web.nhle.com/v1/schedule/{yesterday_str}"
     
     try:
@@ -415,17 +414,27 @@ def fetch_espn_league_data(league_id, season_year):
 
     return roster_data, df_standings, league_name, 'SUCCESS'
 
-# --- FETCH BOX SCORE & LANDING ---
+# --- NEW: FETCH BOX SCORE & LANDING (Boxscore Endpoint First) ---
 @st.cache_data(ttl=60)
 def fetch_nhl_boxscore(game_id):
     """
-    Fetches game data from the 'landing' endpoint, which includes
-    box scores (if available) and pre-game info.
+    Fetches game data. Tries the 'boxscore' endpoint first for stats,
+    then falls back to 'landing' for pre-game info.
     """
-    url = f"https://api-web.nhle.com/v1/gamecenter/{game_id}/landing"
+    # 1. Try Boxscore (Best for stats)
+    url_box = f"https://api-web.nhle.com/v1/gamecenter/{game_id}/boxscore"
     try:
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        return {}
+        r = requests.get(url_box, timeout=5)
+        if r.status_code == 200:
+            return r.json()
+    except: pass
+    
+    # 2. Try Landing (Best for pre-game / summary)
+    url_land = f"https://api-web.nhle.com/v1/gamecenter/{game_id}/landing"
+    try:
+        r = requests.get(url_land, timeout=5)
+        if r.status_code == 200:
+            return r.json()
+    except: pass
+    
+    return {}
