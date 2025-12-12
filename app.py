@@ -68,24 +68,25 @@ st.markdown("""
         object-fit: cover;
     }
 
-    /* SUPER COMPACT GAME CARDS */
+    /* COMPACT GAME CARDS - UPDATED SIZING */
     .game-card { 
         background-color: #262730; 
         border: 1px solid #41444e; 
-        border-radius: 4px; 
-        padding: 1px 2px; 
+        border-radius: 6px; 
+        padding: 3px 4px; 
         text-align: center; 
-        margin: 0 auto 4px auto; 
+        margin: 0 auto 5px auto; 
         max-width: 100%; 
-        box-shadow: 1px 1px 2px rgba(0,0,0,0.2); 
-        line-height: 1.1;
+        box-shadow: 1px 1px 3px rgba(0,0,0,0.2); 
+        line-height: 1.2;
     }
     .team-row { 
         display: flex; 
         justify-content: center; 
         align-items: center; 
-        gap: 6px; 
-        padding-top: 2px;
+        gap: 8px; 
+        padding-top: 3px;
+        padding-bottom: 2px;
     }
     .team-info { 
         display: flex; 
@@ -93,37 +94,40 @@ st.markdown("""
         align-items: center; 
     }
     .team-logo { 
-        width: 22px; 
-        height: 22px; 
+        width: 26px; 
+        height: 26px; 
         object-fit: contain; 
-        margin-bottom: 0px; 
+        margin-bottom: 1px; 
     }
     .team-name { 
-        font-weight: 800; 
-        font-size: 0.7em; 
+        font-weight: 900; 
+        font-size: 0.95em; /* Increased size */
         margin: 0; 
+        line-height: 1;
     }
     .vs-text { 
-        font-size: 0.7em; 
+        font-size: 0.85em; 
         font-weight: bold; 
-        color: #888; 
+        color: #aaa; 
         margin: 0; 
     }
     .game-time { 
-        margin-top: 1px; 
+        margin-top: 3px; 
         font-weight: bold; 
         color: #FF4B4B; 
-        font-size: 0.65em; 
+        font-size: 0.85em; /* Increased size */
         border-top: 1px solid #41444e; 
-        padding-bottom: 1px;
+        padding-top: 2px;
+        padding-bottom: 2px;
     }
     .game-live { 
-        margin-top: 1px; 
+        margin-top: 3px; 
         font-weight: bold; 
         color: #ff4b4b; 
-        font-size: 0.7em; 
+        font-size: 0.9em; 
         border-top: 1px solid #41444e; 
-        padding-bottom: 1px;
+        padding-top: 2px;
+        padding-bottom: 2px;
         animation: pulse 2s infinite; 
     }
 
@@ -191,7 +195,6 @@ else:
                 roster_players = [p['Name'] for team in roster_data.values() for p in team]
                 st.session_state.my_roster = [p for p in st.session_state.my_roster if p in roster_players]
 
-                # Map logic
                 player_team_map = {p['Name']: p.get('NHLTeam', 'FA') for team in roster_data.values() for p in team}
                 df['Team'] = df['Player'].apply(lambda x: player_team_map.get(x, x) if x in roster_players else 'FA')
                 
@@ -428,7 +431,6 @@ else:
     with tab_tools:
         st.header("⚖️ Trade Analyzer")
         
-        # --- LEAGUE STANDINGS ---
         if 'espn_standings' in st.session_state and not st.session_state.espn_standings.empty:
             st.subheader("🏆 League Standings")
             st.dataframe(
@@ -518,8 +520,8 @@ else:
                 trade_config = {
                     "Side": st.column_config.TextColumn("Side", pinned=True),
                     "Player": st.column_config.TextColumn("Player", pinned=True),
-                    "FP": st.column_config.NumberColumn("FP", help="Current Fantasy Points", format="%.1f"),
-                    "ROS_FP": st.column_config.NumberColumn("ROS FP", help="Rest of Season Projected FP", format="%.1f"),
+                    "FP": st.column_config.NumberColumn("FP", format="%.1f", help="Current Fantasy Points"),
+                    "ROS_FP": st.column_config.NumberColumn("ROS FP", format="%.1f", help="Rest of Season Projected FP"),
                     "G": st.column_config.NumberColumn("G", help="Current Goals"), "ROS_G": st.column_config.NumberColumn("ROS G", help="Projected Goals"),
                     "A": st.column_config.NumberColumn("A", help="Current Assists"), "ROS_A": st.column_config.NumberColumn("ROS A", help="Projected Assists"),
                     "Pts": st.column_config.NumberColumn("Pts", help="Current Points"), "ROS_Pts": st.column_config.NumberColumn("ROS Pts", help="Projected Points"),
@@ -529,6 +531,175 @@ else:
                 proj_stats = [c for c in final_cols if 'ROS_' in c or 'FP' in c]
                 styled_player_table = full_list[final_cols].style.format("{:.0f}", subset=valid_current).format("{:.1f}", subset=proj_stats)
                 st.dataframe(styled_player_table, use_container_width=True, hide_index=True, column_config=trade_config)
+
+    # ================= TAB 4: MY ROSTER =================
+    with tab_fantasy:
+        st.header("⚔️ My Roster")
+        col_up, _ = st.columns([1, 2])
+        
+        # --- ROW 1: FILE UPLOAD & TIME FILTER ---
+        with col_up:
+            uploaded_file = st.file_uploader("📂 Load Saved Roster (CSV)", type=["csv"])
+        
+        time_filter = st.selectbox("Select Time Frame", ["Season (2025/26)", "Last 7 Days", "Last 15 Days", "Last 30 Days"])
+
+        # Import Roster from CSV if available
+        if uploaded_file:
+            try:
+                udf = pd.read_csv(uploaded_file)
+                if "Player" in udf.columns: st.session_state.my_roster = [p for p in udf["Player"] if p in df['Player'].values]
+            except: pass
+
+        # Manual Selection (Used for display if league ID isn't entered)
+        selected_players = st.multiselect("Search Players:", df['Player'].unique(), default=st.session_state.my_roster)
+        st.session_state.my_roster = selected_players
+
+        if selected_players:
+            base_team_df = df[df['Player'].isin(selected_players)].copy()
+            
+            # --- DATE FILTERING LOGIC ---
+            display_df = base_team_df # Default to Season stats
+            
+            if time_filter != "Season (2025/26)":
+                days_map = {"Last 7 Days": 7, "Last 15 Days": 15, "Last 30 Days": 30}
+                days = days_map.get(time_filter, 0)
+                
+                # FIXED: Force Start Date to Midnight to avoid missing early games using Pandas Timestamp
+                start_date = pd.Timestamp.now().normalize() - pd.Timedelta(days=days)
+                
+                st.caption(f"Showing stats from **{start_date.strftime('%Y-%m-%d')}** to Present")
+                
+                with st.spinner(f"Fetching stats for last {days} days..."):
+                    recent_stats = []
+                    for _, row in base_team_df.iterrows():
+                        pid = row['ID']
+                        logs = get_player_game_log(pid) 
+                        if not logs.empty:
+                            mask = logs['gameDate'] >= start_date
+                            recent = logs[mask]
+                            
+                            stat_dict = {
+                                'ID': pid, 'Player': row['Player'], 'Team': row['Team'], 'Pos': row['Pos'],
+                                'GP': len(recent),
+                                'G': recent['goals'].sum() if 'goals' in recent.columns else 0,
+                                'A': recent['assists'].sum() if 'assists' in recent.columns else 0,
+                                'Pts': recent['points'].sum() if 'points' in recent.columns else 0,
+                                'SOG': recent['shots'].sum() if 'shots' in recent.columns else 0,
+                                'PPP': recent['powerPlayPoints'].sum() if 'powerPlayPoints' in recent.columns else 0,
+                                'Hits': recent['hits'].sum() if 'hits' in recent.columns else 0,
+                                'BkS': recent['blockedShots'].sum() if 'blockedShots' in recent.columns else 0,
+                                'PIM': recent['pim'].sum() if 'pim' in recent.columns else 0,
+                                'W': len(recent[recent['decision'] == 'W']) if 'decision' in recent.columns else 0,
+                                'SO': recent['shutouts'].sum() if 'shutouts' in recent.columns else 0,
+                                'Svs': recent['saves'].sum() if 'saves' in recent.columns else 0,
+                                'GA': recent['goalsAgainst'].sum() if 'goalsAgainst' in recent.columns else 0,
+                                'L': len(recent[recent['decision'] == 'L']) if 'decision' in recent.columns else 0,
+                                'OTL': len(recent[recent['decision'] == 'OT']) if 'decision' in recent.columns else 0,
+                                'SHP': recent['shorthandedPoints'].sum() if 'shorthandedPoints' in recent.columns else 0,
+                            }
+                            fp = (stat_dict['G']*val_G + stat_dict['A']*val_A + stat_dict['PPP']*val_PPP + 
+                                  stat_dict['SOG']*val_SOG + stat_dict['Hits']*val_Hit + stat_dict['BkS']*val_BkS +
+                                  stat_dict['W']*val_W + stat_dict['GA']*val_GA + stat_dict['Svs']*val_Svs + stat_dict['SO']*val_SO + (stat_dict['SHP'] * val_SHP))
+                            stat_dict['FP'] = fp
+                            recent_stats.append(stat_dict)
+                    
+                    if recent_stats:
+                        display_df = pd.DataFrame(recent_stats)
+                        # Re-merge TOI from main df as it's not easily aggregated
+                        if 'TOI' in df.columns:
+                            display_df = display_df.merge(df[['ID', 'TOI']], on='ID', how='left')
+            
+            # --- RENDER METRICS ---
+            st.download_button("💾 Save Roster", base_team_df[['Player']].to_csv(index=False), "roster.csv", "text/csv")
+            
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Goals", int(display_df['G'].sum()) if 'G' in display_df.columns else 0)
+            c2.metric("Points", int(display_df['Pts'].sum()) if 'Pts' in display_df.columns else 0)
+            c3.metric("Total FP", f"{display_df['FP'].sum():,.1f}" if 'FP' in display_df.columns else "0.0")
+            c4.metric("Goalie Wins", int(display_df['W'].sum()) if 'W' in display_df.columns else 0)
+            
+            # --- RENDER TABLE ---
+            all_possible_cols = ['Player', 'Team', 'Pos', 'FP', 'GP', 'G', 'A', 'Pts', 'GWG', 'SOG', 'Sh%', 'FO%', 'L', 'OTL', 'GAA', 'SV%', 'GSAA', 'SO', 'PIM', 'Hits', 'BkS', 'W', 'Svs', 'GA', 'TOI', 'SHP', 'PPP']
+            final_cols = [c for c in all_possible_cols if c in display_df.columns and c != 'ID'] 
+            
+            roster_config = {
+                "Player": st.column_config.TextColumn("Player", pinned=True),
+                "FP": st.column_config.NumberColumn("FP", format="%.1f", help="Fantasy Points"),
+                "GP": st.column_config.NumberColumn("GP", format="%.0f", help="Games Played"),
+                "GWG": st.column_config.NumberColumn("GWG", format="%.0f", help="Game Winning Goals"),
+                "Sh%": st.column_config.NumberColumn("Sh%", format="%.1f", help="Shooting Percentage"),
+                "FO%": st.column_config.NumberColumn("FO%", format="%.1f", help="Faceoff Win Percentage"),
+                "L": st.column_config.NumberColumn("L", format="%.0f", help="Losses"),
+                "OTL": st.column_config.NumberColumn("OTL", format="%.0f", help="Overtime Losses"),
+                "GAA": st.column_config.NumberColumn("GAA", format="%.2f", help="Goals Against Average"),
+                "SV%": st.column_config.NumberColumn("SV%", format="%.3f", help="Save Percentage"),
+                "GSAA": st.column_config.NumberColumn("GSAA", format="%.2f", help="Goals Saved Above Average"),
+                "SO": st.column_config.NumberColumn("SO", format="%.0f", help="Shutouts"),
+                "PIM": st.column_config.NumberColumn("PIM", format="%.0f"),
+                "Hits": st.column_config.NumberColumn("Hits", format="%.0f"),
+                "BkS": st.column_config.NumberColumn("BkS", format="%.0f"),
+                "G": st.column_config.NumberColumn("G", format="%.0f"),
+                "A": st.column_config.NumberColumn("A", format="%.0f"),
+                "Pts": st.column_config.NumberColumn("Pts", format="%.0f"),
+                "SOG": st.column_config.NumberColumn("SOG", format="%.0f"),
+                "W": st.column_config.NumberColumn("W", format="%.0f"),
+                "GA": st.column_config.NumberColumn("GA", format="%.0f"),
+                "TOI": st.column_config.TextColumn("TOI", help="Time On Ice per Game (string format)"),
+                "SHP": st.column_config.NumberColumn("SHP", format="%.0f", help="Shorthanded Points"),
+                "PPP": st.column_config.NumberColumn("PPP", format="%.0f", help="Power Play Points"),
+            }
+            
+            full_whole_num_cols = ['G', 'A', 'Pts', 'GWG', 'SOG', 'L', 'OTL', 'SO', 'GP', 'PIM', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SHP', 'PPP']
+            valid_whole = [c for c in full_whole_num_cols if c in display_df.columns]
+            
+            valid_one_dec = [c for c in ['FP', 'Sh%', 'FO%'] if c in display_df.columns]
+            valid_two_dec = [c for c in ['GAA', 'GSAA'] if c in display_df.columns]
+            valid_three_dec = [c for c in ['SV%'] if c in display_df.columns]
+
+            styled_team = display_df[final_cols].style \
+                .format("{:.0f}", subset=valid_whole) \
+                .format("{:.1f}", subset=valid_one_dec) \
+                .format("{:.2f}", subset=valid_two_dec) \
+                .format("{:.3f}", subset=valid_three_dec)
+
+            st.dataframe(styled_team, use_container_width=True, hide_index=True, column_config=roster_config)
+            
+            # --- COLD TRENDS GRAPH ---
+            st.divider()
+            st.subheader("❄️ Cold Trends (Last 5 Games vs Season Avg)")
+            
+            trend_data = []
+            for _, row in base_team_df.iterrows():
+                pid = row['ID']
+                logs = get_player_game_log(pid)
+                
+                if not logs.empty and len(logs) >= 5:
+                    logs['GF_FP'] = (logs.get('goals',0)*val_G + logs.get('assists',0)*val_A + 
+                                     logs.get('shots',0)*val_SOG + logs.get('hits',0)*val_Hit + 
+                                     logs.get('blockedShots',0)*val_BkS)
+                    
+                    last_5_avg = logs.tail(5)['GF_FP'].mean()
+                    season_avg = row['FP'] / row['GP'] if row['GP'] > 0 else 0
+                    diff = last_5_avg - season_avg
+                    
+                    trend_data.append({'Player': row['Player'], 'Trend': diff, 'Val': last_5_avg})
+            
+            if trend_data:
+                df_trend = pd.DataFrame(trend_data).sort_values('Trend')
+                chart = alt.Chart(df_trend).mark_bar().encode(
+                    x=alt.X('Player', sort=None),
+                    y=alt.Y('Trend', title='FP Diff (Last 5 vs Season)'),
+                    color=alt.condition(
+                        alt.datum.Trend > 0,
+                        alt.value("#4caf50"),
+                        alt.value("#f44336")
+                    ),
+                    tooltip=['Player', alt.Tooltip('Trend', format='.1f'), alt.Tooltip('Val', title='L5 Avg', format='.1f')]
+                ).properties(height=300)
+                
+                st.altair_chart(chart, use_container_width=True)
+            else:
+                st.caption("Not enough data to analyze recent trends (Need 5+ games).")
 
     # ================= TAB 5: LEAGUE ROSTERS =================
     with tab_league:
