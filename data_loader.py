@@ -118,22 +118,27 @@ def get_player_game_log(player_id):
         return df_log.sort_values(by='gameDate')
     except: return pd.DataFrame()
 
-# --- LOAD SCHEDULE ---
+# --- MODIFIED: Load Schedule (Yest, Today, Tomorrow) ---
 @st.cache_data(ttl=60)
 def load_schedule():
     est_tz = pytz.timezone('US/Eastern')
     now_est = datetime.now(pytz.utc).astimezone(est_tz)
-    today_est_str = now_est.strftime("%Y-%m-%d")
+    
+    today_str = now_est.strftime("%Y-%m-%d")
     tomorrow_str = (now_est + timedelta(days=1)).strftime("%Y-%m-%d")
+    yesterday_str = (now_est - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    url = f"https://api-web.nhle.com/v1/schedule/{today_est_str}"
+    # API returns a rolling week, so just querying today usually gives surrounding days
+    url = f"https://api-web.nhle.com/v1/schedule/{today_str}"
     
     try:
         response = requests.get(url, timeout=5)
         response.raise_for_status()
         data = response.json()
+        
         game_week = data.get('gameWeek', [])
         
+        games_yesterday = []
         games_today = []
         games_tomorrow = []
         
@@ -170,13 +175,15 @@ def load_schedule():
             return processed
 
         for day in game_week:
-            if day['date'] == today_est_str:
+            if day['date'] == yesterday_str:
+                games_yesterday = process_games(day.get('games', []))
+            elif day['date'] == today_str:
                 games_today = process_games(day.get('games', []))
             elif day['date'] == tomorrow_str:
                 games_tomorrow = process_games(day.get('games', []))
                 
-        return games_today, games_tomorrow
-    except: return [], []
+        return games_yesterday, games_today, games_tomorrow
+    except: return [], [], []
 
 @st.cache_data(ttl=3600)
 def load_weekly_leaders():
@@ -264,14 +271,18 @@ def load_nhl_news():
 @st.cache_data(ttl=300)
 def fetch_nhl_standings(view_type):
     url = "https://api-web.nhle.com/v1/standings/now"
+    
     try:
         response = requests.get(url, timeout=5)
         response.raise_for_status()
         data = response.json()
+        
         standings_data = []
+        
         for team_entry in data.get('standings', []):
             team_abbr = team_entry.get('teamAbbrev', {}).get('default')
             team_name = team_entry.get('teamName', {}).get('default')
+            
             conf = team_entry.get('conferenceName')
             div = team_entry.get('divisionName')
             
@@ -298,10 +309,12 @@ def fetch_nhl_standings(view_type):
                 'P%': team_entry.get('pointPctg', 0),
                 'Rank': rank
             })
+
         df = pd.DataFrame(standings_data)
         if not df.empty:
             df = df.sort_values(by=['Group', 'Rank'], ascending=[True, True])
         return df
+        
     except Exception as e:
         return pd.DataFrame()
 
@@ -388,7 +401,11 @@ def fetch_espn_league_data(league_id, season_year):
             t_id = team['id']
             full_name = teams_map.get(t_id, f"Team {t_id}")
             record = team.get('record', {}).get('overall', {})
-            standings_list.append({'Rank': team.get('playoffSeed', 0), 'Team': full_name, 'W': record.get('wins', 0), 'L': record.get('losses', 0), 'T': record.get('ties', 0)})
+            wins = record.get('wins', 0)
+            losses = record.get('losses', 0)
+            ties = record.get('ties', 0)
+            rank = team.get('playoffSeed', 0)
+            standings_list.append({'Rank': rank, 'Team': full_name, 'W': wins, 'L': losses, 'T': ties})
         df_standings = pd.DataFrame(standings_list)
         if not df_standings.empty:
             df_standings = df_standings.sort_values(by='Rank', ascending=True)
@@ -397,11 +414,14 @@ def fetch_espn_league_data(league_id, season_year):
 
     return roster_data, df_standings, league_name, 'SUCCESS'
 
-# --- NEW: FETCH BOX SCORE ---
+# --- NEW: FETCH BOX SCORE & LANDING (Robust) ---
 @st.cache_data(ttl=60)
 def fetch_nhl_boxscore(game_id):
-    """Fetches full boxscore data for a specific game ID."""
-    url = f"https://api-web.nhle.com/v1/gamecenter/{game_id}/boxscore"
+    """
+    Fetches game data from the 'landing' endpoint, which includes
+    box scores (if available) and pre-game info.
+    """
+    url = f"https://api-web.nhle.com/v1/gamecenter/{game_id}/landing"
     try:
         response = requests.get(url, timeout=5)
         response.raise_for_status()
