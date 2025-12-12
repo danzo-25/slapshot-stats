@@ -81,13 +81,11 @@ st.markdown("""
         line-height: 1.0; 
         transition: transform 0.1s ease-in-out;
     }
-    /* Add Hover Effect to indicate Clickability */
     .game-card:hover {
         transform: scale(1.02);
         border-color: #777;
         cursor: pointer;
     }
-
     .team-row { 
         display: flex; 
         justify-content: center; 
@@ -285,15 +283,12 @@ else:
 
     # ================= TAB 1: HOME =================
     with tab_home:
-        # Fetch BOTH schedules
         games_today, games_tomorrow = load_schedule()
         
-        # Helper to render a card
         def render_game_card(game):
             status_class = "game-live" if game.get("is_live") else "game-time"
             game_url = f"https://www.nhl.com/gamecenter/{game['id']}"
             
-            # Wrap the entire card in an <a> tag
             st.markdown(f"""
             <a href="{game_url}" target="_blank" style="text-decoration:none; color:inherit;">
                 <div class="game-card">
@@ -312,6 +307,27 @@ else:
                 </div>
             </a>""", unsafe_allow_html=True)
 
+        # NEWS SECTION
+        news = load_nhl_news()
+        if news:
+            with st.container(border=True):
+                cols = st.columns(4)
+                for i, article in enumerate(news[:4]):
+                    with cols[i]:
+                        img_html = f'<img src="{article["image"]}" class="news-img-v">' if article['image'] else ''
+                        st.markdown(f"""
+                        <div class="news-card-v">
+                            {img_html}
+                            <div class="news-content-v">
+                                <a href="{article['link']}" target="_blank" class="news-title-v">{article['headline']}</a>
+                                <div class="news-desc-v">{article['description']}</div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+        
+        st.divider()
+
+        # GAMES SECTION
         col_t, col_tm = st.columns(2)
         
         with col_t:
@@ -673,8 +689,8 @@ else:
             
             roster_config = {
                 "Player": st.column_config.TextColumn("Player", pinned=True),
-                "FP": st.column_config.NumberColumn("FP", format="%.1f", help="Fantasy Points"),
-                "GP": st.column_config.NumberColumn("GP", format="%.0f", help="Games Played"),
+                "FP": st.column_config.NumberColumn("FP", format="%.1f", help="Fantasy Points in selected period"),
+                "GP": st.column_config.NumberColumn("GP", format="%.0f", help="Games Played in selected period"),
                 "GWG": st.column_config.NumberColumn("GWG", format="%.0f", help="Game Winning Goals"),
                 "Sh%": st.column_config.NumberColumn("Sh%", format="%.1f", help="Shooting Percentage"),
                 "FO%": st.column_config.NumberColumn("FO%", format="%.1f", help="Faceoff Win Percentage"),
