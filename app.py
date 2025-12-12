@@ -68,7 +68,7 @@ st.markdown("""
         object-fit: cover;
     }
 
-    /* COMPACT GAME CARDS */
+    /* ULTRA COMPACT GAME CARDS */
     .game-card { 
         background-color: #262730; 
         border: 1px solid #41444e; 
@@ -132,7 +132,7 @@ st.markdown("""
         animation: pulse 2s infinite; 
     }
 
-    /* UPDATED NEWS STYLING (Shorter, Zoomed Images) */
+    /* NEWS STYLING (Gap-Free Images) */
     .news-container { background-color: #1e1e1e; border-radius: 8px; padding: 10px; border: 1px solid #333; }
     
     .news-card-v { 
@@ -149,14 +149,17 @@ st.markdown("""
     
     .news-img-v { 
         width: 100%; 
-        height: 110px; /* Reduced height */
-        object-fit: cover; /* Ensures image fills container (zooms in) */
-        object-position: center; /* Centers the crop */
+        display: block; /* Removes inline spacing gaps */
+        height: 120px; /* Slightly taller to ensure coverage */
+        object-fit: cover; 
+        object-position: center; 
+        margin: 0; /* Force no margin */
+        padding: 0; /* Force no padding */
         border-bottom: 1px solid #3a3b42;
     }
     
     .news-content-v { 
-        padding: 8px; /* Reduced padding */
+        padding: 8px; 
         flex-grow: 1; 
         display: flex; 
         flex-direction: column; 
@@ -170,7 +173,7 @@ st.markdown("""
         line-height: 1.2; 
         margin-bottom: 4px;
         display: -webkit-box;
-        -webkit-line-clamp: 2; /* Limit title lines */
+        -webkit-line-clamp: 2; 
         -webkit-box-orient: vertical;
         overflow: hidden;
     }
@@ -180,7 +183,7 @@ st.markdown("""
         font-size: 0.75em; 
         color: #aaa; 
         display: -webkit-box; 
-        -webkit-line-clamp: 2; /* Reduced to 2 lines */
+        -webkit-line-clamp: 2; 
         -webkit-box-orient: vertical; 
         overflow: hidden; 
         margin-bottom: 0;
