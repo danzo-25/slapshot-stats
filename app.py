@@ -57,15 +57,25 @@ st.markdown("""
         border-bottom: 1px solid #555;
         padding-bottom: 5px;
     }
+    .roster-player-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 4px;
+        padding: 4px;
+        background-color: #1e1e1e;
+        border-radius: 4px;
+        font-size: 0.85em;
+    }
     
-    .game-card { background-color: #262730; border: 1px solid #41444e; border-radius: 8px; padding: 5px; text-align: center; margin: 0 auto 5px auto; max-width: 100%; box-shadow: 1px 1px 3px rgba(0,0,0,0.2); }
-    .team-row { display: flex; justify-content: center; align-items: center; gap: 5px; }
+    /* COMPACT GAME CARDS */
+    .game-card { background-color: #262730; border: 1px solid #41444e; border-radius: 8px; padding: 4px; text-align: center; margin: 0 auto 5px auto; max-width: 100%; box-shadow: 1px 1px 3px rgba(0,0,0,0.2); font-size: 0.85em; }
+    .team-row { display: flex; justify-content: center; align-items: center; gap: 4px; }
     .team-info { display: flex; flex-direction: column; align-items: center; }
-    .team-logo { width: 55px; height: 55px; object-fit: contain; margin-bottom: 2px; }
-    .team-name { font-weight: 900; font-size: 1em; margin-top: -2px; }
-    .vs-text { font-size: 1em; font-weight: bold; color: #888; padding-top: 5px; }
-    .game-time { margin-top: 5px; font-weight: bold; color: #FF4B4B; font-size: 0.9em; border-top: 1px solid #41444e; padding-top: 2px; }
-    .game-live { margin-top: 5px; font-weight: bold; color: #ff4b4b; font-size: 1.0em; border-top: 1px solid #41444e; padding-top: 2px; animation: pulse 2s infinite; }
+    .team-logo { width: 35px; height: 35px; object-fit: contain; margin-bottom: 1px; }
+    .team-name { font-weight: 900; font-size: 0.9em; margin-top: -1px; }
+    .vs-text { font-size: 0.9em; font-weight: bold; color: #888; padding-top: 5px; }
+    .game-time { margin-top: 4px; font-weight: bold; color: #FF4B4B; font-size: 0.85em; border-top: 1px solid #41444e; padding-top: 2px; }
+    .game-live { margin-top: 4px; font-weight: bold; color: #ff4b4b; font-size: 0.9em; border-top: 1px solid #41444e; padding-top: 2px; animation: pulse 2s infinite; }
     
     .news-container { background-color: #1e1e1e; border-radius: 12px; padding: 15px; border: 1px solid #333; }
     .news-card { display: flex; background-color: #262730; border: 1px solid #3a3b42; margin-bottom: 12px; border-radius: 8px; overflow: hidden; transition: transform 0.2s; }
@@ -95,9 +105,8 @@ else:
         st.header("⚙️ League Settings")
         st.caption("Enter your ESPN League ID (must be public)")
 
-        # Simple ID Input with clear feedback container
         league_id = st.text_input("ESPN League ID", key="league_id_input", placeholder="e.g., 234472")
-        status_container = st.empty() # Placeholder for success/error msg
+        status_container = st.empty()
         
         with st.expander("Fantasy Scoring (FP)", expanded=False):
             val_G = st.number_input("Goals", value=2.0)
@@ -129,7 +138,6 @@ else:
                 roster_players = [p['Name'] for team in roster_data.values() for p in team]
                 st.session_state.my_roster = [p for p in st.session_state.my_roster if p in roster_players]
 
-                # Map logic
                 player_team_map = {p['Name']: p.get('NHLTeam', 'FA') for team in roster_data.values() for p in team}
                 df['Team'] = df['Player'].apply(lambda x: player_team_map.get(x, x) if x in roster_players else 'FA')
                 
@@ -164,27 +172,46 @@ else:
 
     # ================= TAB 1: HOME =================
     with tab_home:
-        st.header("📅 Today's Games")
-        schedule = load_schedule()
-        if not schedule: st.info("No games scheduled.")
-        else:
-            cols_per_row = 5
-            for i in range(0, len(schedule), cols_per_row):
-                cols = st.columns(cols_per_row)
-                for j in range(cols_per_row):
-                    if i + j < len(schedule):
-                        game = schedule[i+j]
-                        with cols[j]:
-                            status_class = "game-live" if game.get("is_live") else "game-time"
-                            st.markdown(f"""
-                            <div class="game-card">
-                                <div class="team-row">
-                                    <div class="team-info"><img src="{game['away_logo']}" class="team-logo"><div class="team-name">{game['away']}</div></div>
-                                    <div class="vs-text">@</div>
-                                    <div class="team-info"><img src="{game['home_logo']}" class="team-logo"><div class="team-name">{game['home']}</div></div>
-                                </div>
-                                <div class="{status_class}">{game['time']}</div>
-                            </div>""", unsafe_allow_html=True)
+        # Fetch BOTH schedules
+        games_today, games_tomorrow = load_schedule()
+        
+        # Helper to render a card
+        def render_game_card(game):
+            status_class = "game-live" if game.get("is_live") else "game-time"
+            st.markdown(f"""
+            <div class="game-card">
+                <div class="team-row">
+                    <div class="team-info"><img src="{game['away_logo']}" class="team-logo"><div class="team-name">{game['away']}</div></div>
+                    <div class="vs-text">@</div>
+                    <div class="team-info"><img src="{game['home_logo']}" class="team-logo"><div class="team-name">{game['home']}</div></div>
+                </div>
+                <div class="{status_class}">{game['time']}</div>
+            </div>""", unsafe_allow_html=True)
+
+        # Split Home tab into 2 main columns
+        col_t, col_tm = st.columns(2)
+        
+        with col_t:
+            st.subheader("Today's Games")
+            if not games_today: st.info("No games today.")
+            else:
+                # Render 2 cards per row within this column
+                for i in range(0, len(games_today), 2):
+                    cols = st.columns(2)
+                    for j in range(2):
+                        if i + j < len(games_today):
+                            with cols[j]: render_game_card(games_today[i+j])
+
+        with col_tm:
+            st.subheader("Tomorrow's Games")
+            if not games_tomorrow: st.info("No games tomorrow.")
+            else:
+                for i in range(0, len(games_tomorrow), 2):
+                    cols = st.columns(2)
+                    for j in range(2):
+                        if i + j < len(games_tomorrow):
+                            with cols[j]: render_game_card(games_tomorrow[i+j])
+
         st.divider()
         col_sos, col_news = st.columns([3, 2])
         with col_sos:
@@ -343,7 +370,6 @@ else:
         else:
             st.info("No player data available for the current filters or time period.")
 
-
     # ================= TAB 3: FANTASY TOOLS =================
     with tab_tools:
         st.header("⚖️ Trade Analyzer")
@@ -437,8 +463,8 @@ else:
                 trade_config = {
                     "Side": st.column_config.TextColumn("Side", pinned=True),
                     "Player": st.column_config.TextColumn("Player", pinned=True),
-                    "FP": st.column_config.NumberColumn("FP", format="%.1f", help="Current Fantasy Points"),
-                    "ROS_FP": st.column_config.NumberColumn("ROS FP", format="%.1f", help="Rest of Season Projected FP"),
+                    "FP": st.column_config.NumberColumn("FP", help="Current Fantasy Points", format="%.1f"),
+                    "ROS_FP": st.column_config.NumberColumn("ROS FP", help="Rest of Season Projected FP", format="%.1f"),
                     "G": st.column_config.NumberColumn("G", help="Current Goals"), "ROS_G": st.column_config.NumberColumn("ROS G", help="Projected Goals"),
                     "A": st.column_config.NumberColumn("A", help="Current Assists"), "ROS_A": st.column_config.NumberColumn("ROS A", help="Projected Assists"),
                     "Pts": st.column_config.NumberColumn("Pts", help="Current Points"), "ROS_Pts": st.column_config.NumberColumn("ROS Pts", help="Projected Points"),
@@ -568,7 +594,6 @@ else:
             
             full_whole_num_cols = ['G', 'A', 'Pts', 'GWG', 'SOG', 'L', 'OTL', 'SO', 'GP', 'PIM', 'Hits', 'BkS', 'W', 'GA', 'Svs', 'SHP', 'PPP']
             valid_whole = [c for c in full_whole_num_cols if c in display_df.columns]
-            
             valid_one_dec = [c for c in ['FP', 'Sh%', 'FO%'] if c in display_df.columns]
             valid_two_dec = [c for c in ['GAA', 'GSAA'] if c in display_df.columns]
             valid_three_dec = [c for c in ['SV%'] if c in display_df.columns]
